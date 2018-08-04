@@ -89,6 +89,7 @@ static pthread_addr_t refresh_context(pthread_addr_t arg);
  * the Apache API won't allow us to set them in the stage needed.
  */
 typedef struct dce_server_config_struct {
+  char *placeholder; /* Needed because some compilers barf on empty structs */
 } dce_server_config_rec;
 
 /* Global variables to hold server-level configuration.  See previous comment */
@@ -312,7 +313,7 @@ int authenticate_dce_user (request_rec *r)
       /* sec_login_setup_identity() verifies that the username given is
        * correct and does the initial setup of the login context.
        */
-      if (!sec_login_setup_identity(r->connection->user, sec_login_no_flags,
+      if (!sec_login_setup_identity((unsigned_char_p_t)r->connection->user, sec_login_no_flags,
                                     &login_context, &dce_st))
         {
           /* Invalid username. Clean up and return */
@@ -459,6 +460,10 @@ int authenticate_dce_user (request_rec *r)
 		    r->server);
 	  
 	  sec_login_purge_context(&login_context, &dce_st);
+	  
+	  if (server_context)
+	    sec_login_set_context(server_context, &dce_st);
+	  
 	  ap_note_basic_auth_failure(r);
 	  return AUTH_REQUIRED;
 	}
@@ -615,7 +620,8 @@ int dce_check_authorization (request_rec *r)
             while(*require_list)
 	      {
 		entity = ap_getword_conf(r->pool, &require_list);
-		if(sec_rgy_pgo_is_member(sec_rgy_default_handle, sec_rgy_domain_group, entity, r->connection->user, &dce_st))
+		if(sec_rgy_pgo_is_member(sec_rgy_default_handle, sec_rgy_domain_group, (unsigned_char_p_t)entity,
+					 (unsigned_char_p_t)r->connection->user, &dce_st))
 		  {
 		    retval = OK; done = 1;
 		    break;
@@ -823,6 +829,13 @@ int dce_log_transaction(request_rec *orig)
                       r->server);
             sec_login_purge_context(&login_context, &dce_st);
 #endif
+
+	    if (server_context) {
+	      sec_login_set_context(server_context, &dce_st);
+	      if (dce_st)
+		log_debug(DEBUG_ERROR, "dce_log_transaction: failed to restore server context", r->server);
+	    }
+	      
           }
       r = r->next;
     }
@@ -966,7 +979,7 @@ module auth_dce_module = {
  */
 static pthread_addr_t refresh_context(pthread_addr_t arg)
 {
-  unsigned32 expiration_time;
+  signed32 expiration_time;
   struct timeval now;
   struct timespec sleep_interval;
   error_status_t dce_st;
@@ -1065,8 +1078,8 @@ static int find_cached_context(request_rec *r, sec_login_handle_t *login_context
 
       
   ap_MD5Init(&md5_context);
-  ap_MD5Update(&md5_context, username, strlen(username));
-  ap_MD5Update(&md5_context, password, strlen(password));
+  ap_MD5Update(&md5_context, (const unsigned char *)username, strlen(username));
+  ap_MD5Update(&md5_context, (const unsigned char *)password, strlen(password));
   ap_MD5Final(input_digest, &md5_context);
 
   
@@ -1075,7 +1088,7 @@ static int find_cached_context(request_rec *r, sec_login_handle_t *login_context
 
   while (count > 0)
     {
-      if (!strncmp(input_digest, context_cache[index].md5_digest, 16))
+      if (!strncmp((const char *)input_digest, (const char *)context_cache[index].md5_digest, 16))
         {
           /* Found it! Import it and return */
 
@@ -1122,8 +1135,8 @@ static void add_cached_context(request_rec *r, sec_login_handle_t *login_context
     }
 
   ap_MD5Init(&md5_context);
-  ap_MD5Update(&md5_context, username, strlen(username));
-  ap_MD5Update(&md5_context, password, strlen(password));
+  ap_MD5Update(&md5_context, (const unsigned char *)username, strlen(username));
+  ap_MD5Update(&md5_context, (const unsigned char *)password, strlen(password));
   ap_MD5Final(context_cache[cache_tail].md5_digest, &md5_context);
 
   context_cache[cache_tail].expire_time = now + CACHE_TTL;

@@ -98,19 +98,19 @@ diff -c -r apache_1.3.3-orig/src/Configure apache_1.3.3/src/Configure
   	OS='IBM AIX 4.1'
 +         CC=xlC_r4
   	CFLAGS="$CFLAGS -DAIX=41 -DNEED_RLIM_T -U__STR__"
-+         LDFLAGS="$LDFLAGS -bI:module/auth_dce/afs_syscall.aix -lm -ldce"
++         LDFLAGS="$LDFLAGS -bI:../modules/auth_dce/afs_syscall.aix -lm -ldce"
   	;;
       *-ibm-aix4.2)
   	OS='IBM AIX 4.2'
 +         CC=xlC_r4
   	CFLAGS="$CFLAGS -DAIX=42 -U__STR__"
-! 	LDFLAGS="$LDFLAGS -bI:module/auth_dce/afs_syscall.aix -lm -ldce"
+! 	LDFLAGS="$LDFLAGS -bI:../modules/auth_dce/afs_syscall.aix -lm -ldce"
   	;;
       *-ibm-aix4.3)
   	OS='IBM AIX 4.3'
 +         CC=xlC_r4
   	CFLAGS="$CFLAGS -DAIX=43 -U__STR__"
-! 	LDFLAGS="$LDFLAGS -bI:module/auth_dce/afs_syscall.aix -lm -ldce"
+! 	LDFLAGS="$LDFLAGS -bI:../modules/auth_dce/afs_syscall.aix -lm -ldce"
   	;;
       *-ibm-aix*)
   	OS='IBM AIX'

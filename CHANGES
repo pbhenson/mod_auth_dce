@@ -1,3 +1,14 @@
+2.1 - Fixed typos in Configuration file for AIX systems. Thanks to
+      Mike Burns <burns@cac.psu.edu> and Bas van der Vlies <basv@sara.nl>
+      for pointing out the problems.
+
+    - Cast parameter types to match function prototypes for various calls.
+      Thanks again to Mike and Bas.
+
+    - Restore server credentials after serving a request using browser
+      credentials.  Thanks once more to Mike for catching this oversight.
+
+
 2.0 - Updated patches for Apache 1.3.3. Note that logging still uses the
       older Apache logging API, which results in somewhat confusing logs.
       Hopefully the next release will update the logging code.
