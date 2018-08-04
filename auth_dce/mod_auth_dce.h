@@ -3,7 +3,7 @@
  *
  * Paul B. Henson <henson@acm.org>
  *
- * Copyright (c) 1996-2001 Paul B. Henson -- see COPYRIGHT file for details
+ * Copyright (c) 1996-2003 Paul B. Henson -- see COPYRIGHT file for details
  *
  */
 

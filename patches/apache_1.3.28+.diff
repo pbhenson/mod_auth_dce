@@ -1,0 +1,142 @@
+diff -c -r apache_1.3.28/src/main/http_request.c apache_1.3.28-dce/src/main/http_request.c
+*** apache_1.3.28/src/main/http_request.c	Sun Jul  6 17:34:10 2003
+--- apache_1.3.28-dce/src/main/http_request.c	Wed Sep 17 16:57:24 2003
+***************
+*** 172,178 ****
+  
+  /* Dealing with the file system to get PATH_INFO
+   */
+! static int get_path_info(request_rec *r)
+  {
+      char *cp;
+      char *path = r->filename;
+--- 172,182 ----
+  
+  /* Dealing with the file system to get PATH_INFO
+   */
+!  
+! /* Modification for mod_auth_dce -- This function used to be static, however,
+!  * mod_auth_dce needs to call it.
+!  */
+! int get_path_info(request_rec *r)
+  {
+      char *cp;
+      char *path = r->filename;
+***************
+*** 287,303 ****
+                  --cp;
+          }
+          else {
+! #if defined(EACCES)
+!             if (errno == EACCES)
+!                 ap_log_rerror(APLOG_MARK, APLOG_ERR, r,
+!                             "access to %s failed because search "
+!                             "permissions are missing on a component "
+!                             "of the path", r->uri);
+!             else
+! #endif 
+!                 ap_log_rerror(APLOG_MARK, APLOG_ERR, r,
+!                             "access to %s failed", r->uri);
+!             return HTTP_FORBIDDEN;
+          }
+  #else
+  #error ENOENT || ENOTDIR not defined; please see the
+--- 291,318 ----
+                  --cp;
+          }
+          else {
+! 	  /* Modification for mod_auth_dce -- This check is made before
+! 	   * authentication modules are called. If the error is access
+! 	   * denied, it is possible that once DCE credentials are obtained
+! 	   * that the entry would be accessible. Therefore, return OK now,
+! 	   * and mod_auth_dce will call this function again after credentials
+! 	   * are obtained.
+! 	   */
+! 	  if (errno == EACCES)
+! 	    return OK;
+! 	  /* Modification for mod_auth_dce -- If a fileset is unavailable
+! 	   * and a request times out, return HTTP_SERVICE_UNAVAILABLE instead
+! 	   * instead of HTTP_FORBIDDEN.
+! 	   */
+! 	  else if (errno == ETIMEDOUT) {
+! 	      ap_log_rerror(APLOG_MARK, APLOG_ERR, r,
+! 			    "access to %s timed out", r->uri);
+! 	      return HTTP_SERVICE_UNAVAILABLE;
+!          }
+! 	  else
+! 	    ap_log_rerror(APLOG_MARK, APLOG_ERR, r,
+! 			  "access to %s failed", r->uri);
+! 	  return HTTP_FORBIDDEN;
+          }
+  #else
+  #error ENOENT || ENOTDIR not defined; please see the
+diff -c -r apache_1.3.28/src/modules/standard/mod_cgi.c apache_1.3.28-dce/src/modules/standard/mod_cgi.c
+*** apache_1.3.28/src/modules/standard/mod_cgi.c	Mon Feb  3 09:13:27 2003
+--- apache_1.3.28-dce/src/modules/standard/mod_cgi.c	Wed Sep 17 16:58:54 2003
+***************
+*** 425,433 ****
+  	return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
+  			       "attempt to invoke directory as script");
+      if (!ap_suexec_enabled) {
+! 	if (!ap_can_exec(&r->finfo))
+! 	    return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
+! 				   "file permissions deny server execution");
+      }
+  
+      if ((retval = ap_setup_client_block(r, REQUEST_CHUNKED_ERROR)))
+--- 425,444 ----
+  	return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
+  			       "attempt to invoke directory as script");
+      if (!ap_suexec_enabled) {
+!        /* Modification for mod_auth_dce -- This used to be a call to ap_can_exec
+!         * in util.c; however, that function does a naive bit check to decide
+!         * if a script is executable. That fails in an environment with ACLs,
+!         * where the server may have permission based on the ACL, but not on
+!         * the Unix mode bits. The access() system call takes ACLs into account.
+!         */
+!        if(access(r->filename, X_OK)) {
+!          if (errno == EACCES)
+!            return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
+!                                   "file permissions deny server execution");
+!          else
+!          return log_scripterror(r, conf, SERVER_ERROR, APLOG_NOERRNO,
+!                                 "system error checking execute access");
+!        }
+      }
+  
+      if ((retval = ap_setup_client_block(r, REQUEST_CHUNKED_ERROR)))
+diff -c -r apache_1.3.28/src/modules/standard/mod_userdir.c apache_1.3.28-dce/src/modules/standard/mod_userdir.c
+*** apache_1.3.28/src/modules/standard/mod_userdir.c	Mon Feb  3 09:13:30 2003
+--- apache_1.3.28-dce/src/modules/standard/mod_userdir.c	Wed Sep 17 17:04:52 2003
+***************
+*** 367,374 ****
+           * anyway, in the hope that some handler might handle it. This can be
+           * used, for example, to run a CGI script for the user.
+           */
+!         if (filename && (!*userdirs || stat(filename, &statbuf) != -1)) {
+!             r->filename = ap_pstrcat(r->pool, filename, dname, NULL);
+  	    /* when statbuf contains info on r->filename we can save a syscall
+  	     * by copying it to r->finfo
+  	     */
+--- 367,376 ----
+           * anyway, in the hope that some handler might handle it. This can be
+           * used, for example, to run a CGI script for the user.
+           */
+!         if (filename) {
+! 	  if (!*userdirs || stat(filename, &statbuf) != -1) {
+! 	    r->filename = ap_pstrcat(r->pool, filename, dname, NULL);
+! 
+  	    /* when statbuf contains info on r->filename we can save a syscall
+  	     * by copying it to r->finfo
+  	     */
+***************
+*** 376,381 ****
+--- 378,385 ----
+  		r->finfo = statbuf;
+              }
+              return OK;
++ 	  }
++ 	  if (errno == ETIMEDOUT) return HTTP_SERVICE_UNAVAILABLE;
+          }
+      }
+  

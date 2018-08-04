@@ -1,3 +1,7 @@
+3.4 - Added apache_1.3.28+.diff to support patching newer versions
+      of Apache.
+
+
 3.3 - Additional internal debugging and minor updates.
 
 

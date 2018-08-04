@@ -7,16 +7,16 @@ code for correct operation. In the patches subdirectory, you'll find a
 patch file:
 
 
-     apache-1.3.9+.diff     -- For Apache 1.3.9 and later
+     apache_1.3.28+.diff    -- For Apache 1.3.28 and later
 
 
-This patch should apply (with possible offset complaints) to Apache 1.3.9
+This patch should apply (with possible offset complaints) to Apache 1.3.28
 and later, including SSL variants thereof.  To apply the patch, run
 the command:
 
 
      patch -p1 -d /path/to/apache_1.3.x < \
-          /path/to/mod_auth_dce-3.3/patches/apache-1.3.9+.diff
+          /path/to/mod_auth_dce-3.4/patches/apache-1.3.28+.diff
 
 
 Technical Details
