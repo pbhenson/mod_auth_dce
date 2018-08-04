@@ -1,3 +1,33 @@
+2.0 - Updated patches for Apache 1.3.3. Note that logging still uses the
+      older Apache logging API, which results in somewhat confusing logs.
+      Hopefully the next release will update the logging code.
+
+    - Added two new directives, DCEUser and DCEKeytab, that allow the
+      server to run authenticated as a DCE principal.
+
+    - Added a new directive, DCEBrowserCreds, that controls whether or not
+      the credentials of the authenticated browser are attached to the
+      server process while satisfying the request.
+
+    - Added a new directive, DCEAuthAuthoritative, that controls whether
+      mod_auth_dce is authoritative or allows other modules to try
+      authentication when DCE fails.
+
+    - Minor changes to internal context caching mechanism. Child processes
+      now clear their context caches on exit to prevent credential pile-up.
+
+    - Group checking now uses default registry handle rather than creating
+      an explicit binding.
+
+    - Removed -I/usr/include/dce from CFLAGS. This directive caused the
+      wrong assert.h header to be included.
+
+    - Modify require line parsing to use ap_getword_white() to match new
+      behavior of other authentication modules in 1.3.3.
+
+    - Removed the README.BUGS file and test subdirectory.
+
+      
 1.5 - Updated for Apache 1.3.x, will no longer work with earlier versions
       of Apache. Sorry for the delayed release.
 

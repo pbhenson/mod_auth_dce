@@ -1,8 +1,8 @@
-diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configuration apache_1.3.1+ssl_1.24/src/Configuration
-*** apache_1.3.1+ssl_1.24-orig/src/Configuration    Fri Sep 25 16:40:44 1998
---- apache_1.3.1+ssl_1.24/src/Configuration Fri Sep 25 16:41:46 1998
+diff -c -r apache_1.3.3+ssl_1.29-orig/src/Configuration apache_1.3.3+ssl_1.29/src/Configuration
+*** apache_1.3.3+ssl_1.29-orig/src/Configuration	Fri Jan 15 16:59:16 1999
+--- apache_1.3.3+ssl_1.29/src/Configuration	Fri Jan 15 15:04:12 1999
 ***************
-*** 243,249 ****
+*** 250,256 ****
   
   # AddModule modules/standard/mod_mime_magic.o
   AddModule modules/standard/mod_mime.o
@@ -10,7 +10,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configuration apache_1.3.1+ssl_1.24/sr
   
   ##
   ## Content delivery modules
---- 243,249 ----
+--- 250,256 ----
   
   # AddModule modules/standard/mod_mime_magic.o
   AddModule modules/standard/mod_mime.o
@@ -19,12 +19,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configuration apache_1.3.1+ssl_1.24/sr
   ##
   ## Content delivery modules
 ***************
-*** 253,264 ****
-  ## STATUS=yes (see the Rules section near the start of this file) to allow
-  ## full status information.  Check conf/access.conf on how to enable this.
-  
-! # AddModule modules/standard/mod_status.o
-  
+*** 265,271 ****
   ## The Info module displays configuration information for the server and 
   ## all included modules. It's very useful for debugging.
   
@@ -32,12 +27,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configuration apache_1.3.1+ssl_1.24/sr
   
   ## mod_include translates server-side include (SSI) statements in text files.
   ## mod_autoindex handles requests for directories which have no index file
---- 253,264 ----
-  ## STATUS=yes (see the Rules section near the start of this file) to allow
-  ## full status information.  Check conf/access.conf on how to enable this.
-  
-! AddModule modules/standard/mod_status.o
-  
+--- 265,271 ----
   ## The Info module displays configuration information for the server and 
   ## all included modules. It's very useful for debugging.
   
@@ -46,7 +36,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configuration apache_1.3.1+ssl_1.24/sr
   ## mod_include translates server-side include (SSI) statements in text files.
   ## mod_autoindex handles requests for directories which have no index file
 ***************
-*** 276,282 ****
+*** 283,289 ****
   ## CGI scripts which act as "handlers" for particular files, for example to
   ## automatically convert every GIF to another file type.
   
@@ -54,7 +44,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configuration apache_1.3.1+ssl_1.24/sr
   AddModule modules/standard/mod_imap.o
   AddModule modules/standard/mod_actions.o
   
---- 276,282 ----
+--- 283,289 ----
   ## CGI scripts which act as "handlers" for particular files, for example to
   ## automatically convert every GIF to another file type.
   
@@ -63,7 +53,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configuration apache_1.3.1+ssl_1.24/sr
   AddModule modules/standard/mod_actions.o
   
 ***************
-*** 318,324 ****
+*** 325,331 ****
   ## Access control and authentication modules. 
   ##
   AddModule modules/standard/mod_access.o
@@ -71,7 +61,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configuration apache_1.3.1+ssl_1.24/sr
   
   ## The anon_auth module allows for anonymous-FTP-style username/ 
   ## password authentication.
---- 318,325 ----
+--- 325,332 ----
   ## Access control and authentication modules. 
   ##
   AddModule modules/standard/mod_access.o
@@ -80,11 +70,11 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configuration apache_1.3.1+ssl_1.24/sr
   
   ## The anon_auth module allows for anonymous-FTP-style username/ 
   ## password authentication.
-diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configure apache_1.3.1+ssl_1.24/src/Configure
-*** apache_1.3.1+ssl_1.24-orig/src/Configure	Fri Sep 25 16:40:44 1998
---- apache_1.3.1+ssl_1.24/src/Configure	Fri Sep 25 16:27:40 1998
+diff -c -r apache_1.3.3+ssl_1.29-orig/src/Configure apache_1.3.3+ssl_1.29/src/Configure
+*** apache_1.3.3+ssl_1.29-orig/src/Configure	Fri Jan 15 16:59:16 1999
+--- apache_1.3.3+ssl_1.29/src/Configure	Fri Jan 15 14:59:50 1999
 ***************
-*** 313,329 ****
+*** 314,330 ****
   	;;
       *-ibm-aix4.1)
   	OS='IBM AIX 4.1'
@@ -102,13 +92,13 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configure apache_1.3.1+ssl_1.24/src/Co
   	;;
       *-ibm-aix*)
   	OS='IBM AIX'
---- 313,333 ----
+--- 314,334 ----
   	;;
       *-ibm-aix4.1)
   	OS='IBM AIX 4.1'
 +         CC=xlC_r4
   	CFLAGS="$CFLAGS -DAIX=41 -DNEED_RLIM_T -U__STR__"
-+ 	LDFLAGS="$LDFLAGS -bI:module/auth_dce/afs_syscall.aix -lm -ldce"
++         LDFLAGS="$LDFLAGS -bI:module/auth_dce/afs_syscall.aix -lm -ldce"
   	;;
       *-ibm-aix4.2)
   	OS='IBM AIX 4.2'
@@ -125,7 +115,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configure apache_1.3.1+ssl_1.24/src/Co
       *-ibm-aix*)
   	OS='IBM AIX'
 ***************
-*** 499,505 ****
+*** 503,509 ****
       *-dec-osf*)
   	OS='DEC OSF/1'
   	CFLAGS="$CFLAGS -DOSF1"
@@ -133,7 +123,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configure apache_1.3.1+ssl_1.24/src/Co
   	;;
       *-qnx)
   	OS='QNX'
---- 503,509 ----
+--- 507,513 ----
       *-dec-osf*)
   	OS='DEC OSF/1'
   	CFLAGS="$CFLAGS -DOSF1"
@@ -142,7 +132,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configure apache_1.3.1+ssl_1.24/src/Co
       *-qnx)
   	OS='QNX'
 ***************
-*** 542,549 ****
+*** 546,553 ****
       *-solaris2*)
       	PLATOSVERS=`echo $PLAT | sed 's/^.*solaris2.//'`
   	OS="Solaris $PLATOSVERS"
@@ -151,27 +141,27 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/Configure apache_1.3.1+ssl_1.24/src/Co
   	DBM_LIB=""
   	case "$PLATOSVERS" in
   	    2[01234]*)
---- 546,560 ----
+--- 550,564 ----
       *-solaris2*)
       	PLATOSVERS=`echo $PLAT | sed 's/^.*solaris2.//'`
   	OS="Solaris $PLATOSVERS"
-! 	CFLAGS="$CFLAGS -DSOLARIS2=$PLATOSVERS -I/usr/include/dce -D_REENTRANT"
-! 	case "$PLATOSVERS" in
-! 	    2[012345]*)
-! 		LIBS="$LIBS -ldce -lthread -lsocket -lnsl -lm"
-! 		;;
-! 	    26*)
-! 		LIBS="$LIBS -ldce -lpthread -lsocket -lnsl"
-! 		;;
-! 	esac
+! 	CFLAGS="$CFLAGS -DSOLARIS2=$PLATOSVERS -D_REENTRANT"
+!         case "$PLATOSVERS" in
+!             2[012345]*)
+!                 LIBS="$LIBS -ldce -lthread -lsocket -lnsl -lm"
+!                 ;;
+!             26*)
+!                 LIBS="$LIBS -ldce -lpthread -lsocket -lnsl"
+!                 ;;
+!         esac
   	DBM_LIB=""
   	case "$PLATOSVERS" in
   	    2[01234]*)
-diff -c -r apache_1.3.1+ssl_1.24-orig/src/main/http_request.c apache_1.3.1+ssl_1.24/src/main/http_request.c
-*** apache_1.3.1+ssl_1.24-orig/src/main/http_request.c	Wed Jul  1 14:19:54 1998
---- apache_1.3.1+ssl_1.24/src/main/http_request.c	Wed Sep 16 16:44:28 1998
+diff -c -r apache_1.3.3+ssl_1.29-orig/src/main/http_request.c apache_1.3.3+ssl_1.29/src/main/http_request.c
+*** apache_1.3.3+ssl_1.29-orig/src/main/http_request.c	Tue Oct  6 12:06:09 1998
+--- apache_1.3.3+ssl_1.29/src/main/http_request.c	Fri Jan 15 14:59:51 1999
 ***************
-*** 170,176 ****
+*** 171,177 ****
   
   /* Dealing with the file system to get PATH_INFO
    */
@@ -179,7 +169,7 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/main/http_request.c apache_1.3.1+ssl_1
   {
       char *cp;
       char *path = r->filename;
---- 170,180 ----
+--- 171,181 ----
   
   /* Dealing with the file system to get PATH_INFO
    */
@@ -192,8 +182,8 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/main/http_request.c apache_1.3.1+ssl_1
       char *cp;
       char *path = r->filename;
 ***************
-*** 232,237 ****
---- 236,250 ----
+*** 235,240 ****
+--- 239,253 ----
               *cp = '\0';
               return OK;
           }
@@ -209,84 +199,22 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/main/http_request.c apache_1.3.1+ssl_1
   #if defined(ENOENT) && defined(ENOTDIR)
           else if (errno == ENOENT || errno == ENOTDIR) {
               last_cp = cp;
-diff -c -r apache_1.3.1+ssl_1.24-orig/src/modules/ssl/apache_ssl.c apache_1.3.1+ssl_1.24/src/modules/ssl/apache_ssl.c
-*** apache_1.3.1+ssl_1.24-orig/src/modules/ssl/apache_ssl.c	Sun Aug 30 12:54:05 1998
---- apache_1.3.1+ssl_1.24/src/modules/ssl/apache_ssl.c	Wed Sep 16 16:15:07 1998
+diff -c -r apache_1.3.3+ssl_1.29-orig/src/modules/standard/mod_cgi.c apache_1.3.3+ssl_1.29/src/modules/standard/mod_cgi.c
+*** apache_1.3.3+ssl_1.29-orig/src/modules/standard/mod_cgi.c	Mon Sep 21 14:09:51 1998
+--- apache_1.3.3+ssl_1.29/src/modules/standard/mod_cgi.c	Fri Jan 15 14:59:51 1999
 ***************
-*** 56,62 ****
-  #include <stdio.h>
-  #include <stdlib.h>
-  #include <stdarg.h>
-! #include <assert.h>
-  
-  #include <ssl.h>
-  #include <err.h>
---- 56,63 ----
-  #include <stdio.h>
-  #include <stdlib.h>
-  #include <stdarg.h>
-! /* #include <assert.h> */
-! #define assert(X) ;
-  
-  #include <ssl.h>
-  #include <err.h>
-diff -c -r apache_1.3.1+ssl_1.24-orig/src/modules/ssl/gcacheclient.c apache_1.3.1+ssl_1.24/src/modules/ssl/gcacheclient.c
-*** apache_1.3.1+ssl_1.24-orig/src/modules/ssl/gcacheclient.c   Thu Aug 13 11:39:25 1998
---- apache_1.3.1+ssl_1.24/src/modules/ssl/gcacheclient.c    Fri Sep 25 17:02:12 1998
-***************
-*** 60,66 ****
-  #include <sys/un.h>
-  #include <stdlib.h>
-  #include <memory.h>
-! #include <assert.h>
-  #include <unistd.h>
-  #include <string.h>
-  #include "gcache.h"
---- 60,67 ----
-  #include <sys/un.h>
-  #include <stdlib.h>
-  #include <memory.h>
-! /* #include <assert.h> */
-! #define assert(X) ;
-  #include <unistd.h>
-  #include <string.h>
-  #include "gcache.h"
-diff -c -r apache_1.3.1+ssl_1.24-orig/src/modules/ssl/gcachecommon.c apache_1.3.1+ssl_1.24/src/modules/ssl/gcachecommon.c
-*** apache_1.3.1+ssl_1.24-orig/src/modules/ssl/gcachecommon.c	Thu Aug 13 11:39:26 1998
---- apache_1.3.1+ssl_1.24/src/modules/ssl/gcachecommon.c	Wed Sep 16 16:13:32 1998
-***************
-*** 54,60 ****
-   */
-  
-  #include <unistd.h>
-! #include <assert.h>
-  #include <stdlib.h>
-  #include <memory.h>
-  #include <time.h>
---- 54,61 ----
-   */
-  
-  #include <unistd.h>
-! /* #include <assert.h> */
-! #define assert(X) ;
-  #include <stdlib.h>
-  #include <memory.h>
-  #include <time.h>
-diff -c -r apache_1.3.1+ssl_1.24-orig/src/modules/standard/mod_cgi.c apache_1.3.1+ssl_1.24/src/modules/standard/mod_cgi.c
-*** apache_1.3.1+ssl_1.24-orig/src/modules/standard/mod_cgi.c	Sat Jun 27 11:09:31 1998
---- apache_1.3.1+ssl_1.24/src/modules/standard/mod_cgi.c	Wed Sep 16 16:54:34 1998
-***************
-*** 403,411 ****
+*** 403,412 ****
   	return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
   			       "attempt to invoke directory as script");
       if (!ap_suexec_enabled) {
 ! 	if (!ap_can_exec(&r->finfo))
 ! 	    return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
 ! 				   "file permissions deny server execution");
-      }
+!     }
   
       if ((retval = ap_setup_client_block(r, REQUEST_CHUNKED_ERROR)))
---- 403,422 ----
+  	return retval;
+--- 403,423 ----
   	return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
   			       "attempt to invoke directory as script");
       if (!ap_suexec_enabled) {
@@ -301,9 +229,10 @@ diff -c -r apache_1.3.1+ssl_1.24-orig/src/modules/standard/mod_cgi.c apache_1.3.
 !            return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
 !                                   "file permissions deny server execution");
 !          else
-!            return log_scripterror(r, conf, SERVER_ERROR, APLOG_NOERRNO,
-!                                   "system error checking execute access");
+! 	   return log_scripterror(r, conf, SERVER_ERROR, APLOG_NOERRNO,
+! 				  "system error checking execute access");
 !        }
-      }
+!      }
   
       if ((retval = ap_setup_client_block(r, REQUEST_CHUNKED_ERROR)))
+  	return retval;

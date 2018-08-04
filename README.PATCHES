@@ -7,24 +7,24 @@ code for correct operation. In the patches subdirectory, you'll find two
 patch files:
 
 
-     apache-1.3.1.diff              -- For Apache 1.3.1
-     apache-1.3.1+ssl_1.24.diff     -- For Apache 1.3.1+ssl1.24
+     apache-1.3.3.diff              -- For Apache 1.3.3
+     apache-1.3.3+ssl_1.29.diff     -- For Apache 1.3.3+ssl1.29
 
 
-To apply the patch to Apache 1.3.1, run the command:
+To apply the patch to Apache 1.3.3, run the command:
 
 
-     patch -p1 -d /path/to/apache_1.3.1 < \
-          /path/to/mod_auth_dce-1.5/patches/apache-1.3.1.diff
+     patch -p1 -d /path/to/apache_1.3.3 < \
+          /path/to/mod_auth_dce-2.0/patches/apache-1.3.3.diff
 
 
-To apply the patch to Apache 1.3.1+ssl1.24, first be sure you have already
-applied the SSL patch to the Apache 1.3.1 distribution. Then, run the
+To apply the patch to Apache 1.3.3+ssl1.29, first be sure you have already
+applied the SSL patch to the Apache 1.3.3 distribution. Then, run the
 command:
 
 
-     patch -p1 -d /path/to/apache_1.3.1+ssl1.24 < \
-          /path/to/mod_auth_dce-1.5/patches/apache-1.3.1+ssl_1.24.diff
+     patch -p1 -d /path/to/apache_1.3.3+ssl1.29 < \
+          /path/to/mod_auth_dce-2.0/patches/apache-1.3.3+ssl_1.29.diff
 
 
 
@@ -73,14 +73,3 @@ the modifications needed to be made.
 
        The C compiler, C flags, libraries, and ld flags are modified for
        DCE support for Solaris, Digital Unix, and AIX.
-
-
-The following changes are only included in the SSL version of the patch:
-
-  apache_ssl.c
-  gcacheclient.c
-  gcachecommon.c
-
-       Under Solaris, including -D_REENTRANT caused assert() not to be
-       found during linking, so assert.h is no longer included and
-       assert() is #define'd to be null.
