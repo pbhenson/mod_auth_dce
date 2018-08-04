@@ -1,0 +1,247 @@
+diff -c -r apache_1.3.1-orig/src/Configuration apache_1.3.1/src/Configuration
+*** apache_1.3.1-orig/src/Configuration	Sat Jul 18 16:03:37 1998
+--- apache_1.3.1/src/Configuration	Fri Sep 25 17:13:26 1998
+***************
+*** 229,235 ****
+  
+  # AddModule modules/standard/mod_mime_magic.o
+  AddModule modules/standard/mod_mime.o
+! AddModule modules/standard/mod_negotiation.o
+  
+  ##
+  ## Content delivery modules
+--- 229,235 ----
+  
+  # AddModule modules/standard/mod_mime_magic.o
+  AddModule modules/standard/mod_mime.o
+! #AddModule modules/standard/mod_negotiation.o
+  
+  ##
+  ## Content delivery modules
+***************
+*** 239,250 ****
+  ## STATUS=yes (see the Rules section near the start of this file) to allow
+  ## full status information.  Check conf/access.conf on how to enable this.
+  
+! # AddModule modules/standard/mod_status.o
+  
+  ## The Info module displays configuration information for the server and 
+  ## all included modules. It's very useful for debugging.
+  
+! # AddModule modules/standard/mod_info.o
+  
+  ## mod_include translates server-side include (SSI) statements in text files.
+  ## mod_autoindex handles requests for directories which have no index file
+--- 239,250 ----
+  ## STATUS=yes (see the Rules section near the start of this file) to allow
+  ## full status information.  Check conf/access.conf on how to enable this.
+  
+! AddModule modules/standard/mod_status.o
+  
+  ## The Info module displays configuration information for the server and 
+  ## all included modules. It's very useful for debugging.
+  
+! AddModule modules/standard/mod_info.o
+  
+  ## mod_include translates server-side include (SSI) statements in text files.
+  ## mod_autoindex handles requests for directories which have no index file
+***************
+*** 262,268 ****
+  ## CGI scripts which act as "handlers" for particular files, for example to
+  ## automatically convert every GIF to another file type.
+  
+! AddModule modules/standard/mod_asis.o
+  AddModule modules/standard/mod_imap.o
+  AddModule modules/standard/mod_actions.o
+  
+--- 262,268 ----
+  ## CGI scripts which act as "handlers" for particular files, for example to
+  ## automatically convert every GIF to another file type.
+  
+! #AddModule modules/standard/mod_asis.o
+  AddModule modules/standard/mod_imap.o
+  AddModule modules/standard/mod_actions.o
+  
+***************
+*** 304,310 ****
+  ## Access control and authentication modules. 
+  ##
+  AddModule modules/standard/mod_access.o
+! AddModule modules/standard/mod_auth.o
+  
+  ## The anon_auth module allows for anonymous-FTP-style username/ 
+  ## password authentication.
+--- 304,311 ----
+  ## Access control and authentication modules. 
+  ##
+  AddModule modules/standard/mod_access.o
+! AddModule modules/auth_dce/mod_auth_dce.o
+! #AddModule modules/standard/mod_auth.o
+  
+  ## The anon_auth module allows for anonymous-FTP-style username/ 
+  ## password authentication.
+Only in apache_1.3.1/src: Configuration.orig
+diff -c -r apache_1.3.1-orig/src/Configure apache_1.3.1/src/Configure
+*** apache_1.3.1-orig/src/Configure	Sat Jul 18 03:51:52 1998
+--- apache_1.3.1/src/Configure	Fri Sep 25 17:13:26 1998
+***************
+*** 313,329 ****
+  	;;
+      *-ibm-aix4.1)
+  	OS='IBM AIX 4.1'
+  	CFLAGS="$CFLAGS -DAIX=41 -DNEED_RLIM_T -U__STR__"
+  	;;
+      *-ibm-aix4.2)
+  	OS='IBM AIX 4.2'
+  	CFLAGS="$CFLAGS -DAIX=42 -U__STR__"
+! 	LDFLAGS="$LDFLAGS -lm"
+  	;;
+      *-ibm-aix4.3)
+  	OS='IBM AIX 4.3'
+  	CFLAGS="$CFLAGS -DAIX=43 -U__STR__"
+! 	LDFLAGS="$LDFLAGS -lm"
+  	;;
+      *-ibm-aix*)
+  	OS='IBM AIX'
+--- 313,333 ----
+  	;;
+      *-ibm-aix4.1)
+  	OS='IBM AIX 4.1'
++         CC=xlC_r4
+  	CFLAGS="$CFLAGS -DAIX=41 -DNEED_RLIM_T -U__STR__"
++ 	LDFLAGS="$LDFLAGS -bI:module/auth_dce/afs_syscall.aix -lm -ldce"
+  	;;
+      *-ibm-aix4.2)
+  	OS='IBM AIX 4.2'
++         CC=xlC_r4
+  	CFLAGS="$CFLAGS -DAIX=42 -U__STR__"
+! 	LDFLAGS="$LDFLAGS -bI:module/auth_dce/afs_syscall.aix -lm -ldce"
+  	;;
+      *-ibm-aix4.3)
+  	OS='IBM AIX 4.3'
++         CC=xlC_r4
+  	CFLAGS="$CFLAGS -DAIX=43 -U__STR__"
+! 	LDFLAGS="$LDFLAGS -bI:module/auth_dce/afs_syscall.aix -lm -ldce"
+  	;;
+      *-ibm-aix*)
+  	OS='IBM AIX'
+***************
+*** 499,505 ****
+      *-dec-osf*)
+  	OS='DEC OSF/1'
+  	CFLAGS="$CFLAGS -DOSF1"
+! 	LIBS="$LIBS -lm"
+  	;;
+      *-qnx)
+  	OS='QNX'
+--- 503,509 ----
+      *-dec-osf*)
+  	OS='DEC OSF/1'
+  	CFLAGS="$CFLAGS -DOSF1"
+! 	LIBS="$LIBS -ldce -lm"
+  	;;
+      *-qnx)
+  	OS='QNX'
+***************
+*** 542,549 ****
+      *-solaris2*)
+      	PLATOSVERS=`echo $PLAT | sed 's/^.*solaris2.//'`
+  	OS="Solaris $PLATOSVERS"
+! 	CFLAGS="$CFLAGS -DSOLARIS2=$PLATOSVERS"
+! 	LIBS="$LIBS -lsocket -lnsl"
+  	DBM_LIB=""
+  	case "$PLATOSVERS" in
+  	    2[01234]*)
+--- 546,560 ----
+      *-solaris2*)
+      	PLATOSVERS=`echo $PLAT | sed 's/^.*solaris2.//'`
+  	OS="Solaris $PLATOSVERS"
+! 	CFLAGS="$CFLAGS -DSOLARIS2=$PLATOSVERS -I/usr/include/dce -D_REENTRANT"
+! 	case "$PLATOSVERS" in
+! 	    2[012345]*)
+! 		LIBS="$LIBS -ldce -lthread -lsocket -lnsl -lm"
+! 		;;
+! 	    26*)
+! 		LIBS="$LIBS -ldce -lpthread -lsocket -lnsl"
+! 		;;
+! 	esac
+  	DBM_LIB=""
+  	case "$PLATOSVERS" in
+  	    2[01234]*)
+diff -c -r apache_1.3.1-orig/src/main/http_request.c apache_1.3.1/src/main/http_request.c
+*** apache_1.3.1-orig/src/main/http_request.c	Wed Jul  1 14:19:54 1998
+--- apache_1.3.1/src/main/http_request.c	Fri Sep 25 17:13:26 1998
+***************
+*** 170,176 ****
+  
+  /* Dealing with the file system to get PATH_INFO
+   */
+! static int get_path_info(request_rec *r)
+  {
+      char *cp;
+      char *path = r->filename;
+--- 170,180 ----
+  
+  /* Dealing with the file system to get PATH_INFO
+   */
+! 
+! /* Modification for mod_auth_dce -- This function used to be static, however,
+!  * mod_auth_dce needs to call it.
+!  */
+! int get_path_info(request_rec *r)
+  {
+      char *cp;
+      char *path = r->filename;
+***************
+*** 232,237 ****
+--- 236,250 ----
+              *cp = '\0';
+              return OK;
+          }
++         /* Modification for mod_auth_dce -- This check is made before
++          * authentication modules are called. If the error is access
++          * denied, it is possible that once DCE credentials are obtained
++          * that the entry would be accessible. Therefore, return OK now,
++          * and mod_auth_dce will call this function again after credentials
++          * are obtained.
++          */
++         else if (errno == EACCES)
++           return OK;
+  #if defined(ENOENT) && defined(ENOTDIR)
+          else if (errno == ENOENT || errno == ENOTDIR) {
+              last_cp = cp;
+diff -c -r apache_1.3.1-orig/src/modules/standard/mod_cgi.c apache_1.3.1/src/modules/standard/mod_cgi.c
+*** apache_1.3.1-orig/src/modules/standard/mod_cgi.c	Sat Jun 27 11:09:31 1998
+--- apache_1.3.1/src/modules/standard/mod_cgi.c	Fri Sep 25 17:13:26 1998
+***************
+*** 403,411 ****
+  	return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
+  			       "attempt to invoke directory as script");
+      if (!ap_suexec_enabled) {
+! 	if (!ap_can_exec(&r->finfo))
+! 	    return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
+! 				   "file permissions deny server execution");
+      }
+  
+      if ((retval = ap_setup_client_block(r, REQUEST_CHUNKED_ERROR)))
+--- 403,422 ----
+  	return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
+  			       "attempt to invoke directory as script");
+      if (!ap_suexec_enabled) {
+!        /* Modification for mod_auth_dce -- This used to be a call to ap_can_exec
+!         * in util.c; however, that function does a naive bit check to decide
+!         * if a script is executable. That fails in an environment with ACLs,
+!         * where the server may have permission based on the ACL, but not on
+!         * the Unix mode bits. The access() system call takes ACLs into account.
+!         */
+!        if(access(r->filename, X_OK)) {
+!          if (errno == EACCES)
+!            return log_scripterror(r, conf, FORBIDDEN, APLOG_NOERRNO,
+!                                   "file permissions deny server execution");
+!          else
+!            return log_scripterror(r, conf, SERVER_ERROR, APLOG_NOERRNO,
+!                                   "system error checking execute access");
+!        }
+      }
+  
+      if ((retval = ap_setup_client_block(r, REQUEST_CHUNKED_ERROR)))

@@ -2,9 +2,8 @@
  * DCE Authentication Module for Apache HTTP Server
  *
  * Paul Henson <henson@acm.org>
- * California State Polytechnic University, Pomona
  *
- * Copyright (c) 1996,1997 Paul Henson -- see COPYRIGHT file for details
+ * Copyright (c) 1996,1997,1998 Paul Henson -- see COPYRIGHT file for details
  *
  */
 
@@ -23,8 +22,10 @@
 #include "http_config.h"
 #include "http_core.h"
 #include "http_log.h"
+#include "http_main.h"
 #include "http_protocol.h"
-#include "md5.h"
+#include "util_script.h"
+#include "ap_md5.h"
 
 /* In AIX land, afs_syscall is called kafs_syscall.
  * Variety is the spice of life, after all....
@@ -76,7 +77,7 @@ static void add_cached_context(request_rec *r, sec_login_handle_t *, char *, cha
 #define DEBUG_INFO 1
 #define DEBUG_ERROR 0
 #define DEBUG_CACHE 0
-#define log_debug(L, X, Y) if (L <= DEBUG) log_error(X, Y)
+#define log_debug(L, X, Y) if (L <= DEBUG) ap_log_error_old(X, Y)
 #else
 #define log_debug(L, X, Y)
 #endif
@@ -103,7 +104,7 @@ typedef struct auth_dce_config_struct {
  */
 void *create_auth_dce_dir_config(pool *p, char *d)
 {
-    return pcalloc (p, sizeof(auth_dce_config_rec));
+    return ap_pcalloc (p, sizeof(auth_dce_config_rec));
 }
 
 
@@ -150,11 +151,19 @@ const char *set_include_pw(cmd_parms *cmd, void *dv, int arg)
   return NULL;
 }
 
+static const char *set_indexes(cmd_parms *cmd, void *dv, const char *args)
+{
+  auth_dce_config_rec *d = (auth_dce_config_rec *)dv;
+
+  d->index_names = ap_pstrcat(cmd->pool, args, NULL);
+
+  return NULL;
+}
 
 /* Function that is called to merge two directory configurations. */
 void *merge_dce_dir_configs(pool *p, void *basev, void *addv)
 {
-  auth_dce_config_rec *new = (auth_dce_config_rec*)pcalloc(p, sizeof(auth_dce_config_rec));
+  auth_dce_config_rec *new = (auth_dce_config_rec*)ap_pcalloc(p, sizeof(auth_dce_config_rec));
   auth_dce_config_rec *base = (auth_dce_config_rec *)basev;
   auth_dce_config_rec *add = (auth_dce_config_rec *)addv;
 
@@ -179,8 +188,7 @@ command_rec auth_dce_cmds[] = {
     "Use DFS ACLs for authorization in this directory?" },
   { "DCEIncludePW", set_include_pw, NULL, OR_AUTHCFG, FLAG,
     "Include DCE password for CGIs run in this directory?" },
-  { "DCEDirectoryIndex", set_string_slot,
-    (void*)XtOffsetOf(auth_dce_config_rec, index_names),
+  { "DCEDirectoryIndex", set_indexes, NULL,
     OR_INDEXES, RAW_ARGS, NULL },
   { NULL }
 };
@@ -225,13 +233,13 @@ int authenticate_dce_user (request_rec *r)
   
   /* Obtain the per-directory configuration for this request */
   auth_dce_config_rec *a = (auth_dce_config_rec *)
-    get_module_config (r->per_dir_config, &auth_dce_module);
+    ap_get_module_config (r->per_dir_config, &auth_dce_module);
 
   
-  log_debug(DEBUG_INFO, pstrcat(r->pool, "authenticate_dce_user: called for URI ",
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool, "authenticate_dce_user: called for URI ",
                        r->uri, NULL), r->server);
 
-  log_debug(DEBUG_INFO, pstrcat(r->pool, "authenticate_dce_user: called for filename ",
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool, "authenticate_dce_user: called for filename ",
                        r->filename, NULL), r->server);
 
 
@@ -247,7 +255,7 @@ int authenticate_dce_user (request_rec *r)
    * need credentials to complete the request. Return OK without bothering
    * with DCE calls.
    */
-  if (!get_module_config(r->request_config, &auth_dce_module))
+  if (!ap_get_module_config(r->request_config, &auth_dce_module))
     {
       log_debug(DEBUG_INFO, "authenticate_dce_user: request_config not set, returning OK", r->server);
       return OK;
@@ -257,18 +265,18 @@ int authenticate_dce_user (request_rec *r)
   /* dce_log_transaction() checks the request_config variable when it tries
    * to purge or release the DCE context. Set it to NULL initially.
    */
-  set_module_config(r->request_config, &auth_dce_module, NULL);
+  ap_set_module_config(r->request_config, &auth_dce_module, NULL);
 
   
   /* Call Apache function to extract the username and password information
    * from the request.
    */
-  get_basic_auth_pw (r, &sent_pw);
+  ap_get_basic_auth_pw (r, (const char **)&sent_pw);
 
-  log_debug(DEBUG_INFO, pstrcat(r->pool, "authenticate_dce_user: request made by user ",
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool, "authenticate_dce_user: request made by user ",
                        r->connection->user, NULL), r->server);
 
-  /* log_debug(DEBUG_INFO, pstrcat(r->pool, "authenticate_dce_user: password is  ",
+  /* log_debug(DEBUG_INFO, ap_pstrcat(r->pool, "authenticate_dce_user: password is  ",
    *                               sent_pw, NULL), r->server);
    */
   
@@ -287,14 +295,14 @@ int authenticate_dce_user (request_rec *r)
         {
           /* Invalid username. Clean up and return */
           dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-          log_debug(DEBUG_ERROR, pstrcat(r->pool,
+          log_debug(DEBUG_ERROR, ap_pstrcat(r->pool,
                                "authenticate_dce_user: sec_login_setup_identity failed for ", r->connection->user, " - ",
                                dce_error,
                                NULL),
                     r->server);
       
           sec_login_purge_context(&login_context, &dce_st);
-          note_basic_auth_failure(r);
+          ap_note_basic_auth_failure(r);
       
           log_debug(DEBUG_INFO, "authenticate_dce_user: returning AUTH_REQUIRED",
                     r->server);
@@ -326,13 +334,13 @@ int authenticate_dce_user (request_rec *r)
         {
           /* Wrong password. Clean up and return */
           dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-          log_debug(DEBUG_ERROR, pstrcat(r->pool,
+          log_debug(DEBUG_ERROR, ap_pstrcat(r->pool,
                                "authenticate_dce_user: sec_login_validate_ident failed for ", r->connection->user, " - ",
                                dce_error,
                                NULL),
                     r->server);
           sec_login_purge_context(&login_context, &dce_st);
-          note_basic_auth_failure(r);
+          ap_note_basic_auth_failure(r);
           log_debug(DEBUG_INFO, "authenticate_dce_user: returning AUTH_REQUIRED",
                     r->server);
           return AUTH_REQUIRED;
@@ -346,7 +354,7 @@ int authenticate_dce_user (request_rec *r)
       if (!sec_login_certify_identity(login_context, &dce_st))
         {
           dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-          log_debug(DEBUG_ERROR, pstrcat(r->pool,
+          log_debug(DEBUG_ERROR, ap_pstrcat(r->pool,
                                "authenticate_dce_user: certify_identity failed for ", r->connection->user, " - ",
                                dce_error,
                                NULL),
@@ -360,7 +368,7 @@ int authenticate_dce_user (request_rec *r)
            * username or password, but we don't have that mechanism.
            */
           sec_login_purge_context(&login_context, &dce_st);
-          note_basic_auth_failure(r);
+          ap_note_basic_auth_failure(r);
           return AUTH_REQUIRED;
         }
           
@@ -369,7 +377,7 @@ int authenticate_dce_user (request_rec *r)
        */
       if (auth_src != sec_login_auth_src_network)
         {
-          log_debug(DEBUG_ERROR, pstrcat(r->pool,
+          log_debug(DEBUG_ERROR, ap_pstrcat(r->pool,
                                "authenticate_dce_user: no network credentials for ", r->connection->user, " - ",
                                dce_error,
                                NULL),
@@ -387,7 +395,7 @@ int authenticate_dce_user (request_rec *r)
            * password, but we don't have that mechanism.
            */
           sec_login_purge_context(&login_context, &dce_st);
-          note_basic_auth_failure(r);
+          ap_note_basic_auth_failure(r);
           return AUTH_REQUIRED;
         }
           
@@ -400,7 +408,7 @@ int authenticate_dce_user (request_rec *r)
         {
           /* The context set failed. Abort and return authorization still required. */
           dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-          log_debug(DEBUG_ERROR, pstrcat(r->pool,
+          log_debug(DEBUG_ERROR, ap_pstrcat(r->pool,
                                          "authenticate_dce_user: set_context failed for",
                                          r->connection->user, " - ",
                                dce_error,
@@ -408,7 +416,7 @@ int authenticate_dce_user (request_rec *r)
                     r->server);
           
           sec_login_purge_context(&login_context, &dce_st);
-          note_basic_auth_failure(r);
+          ap_note_basic_auth_failure(r);
           return AUTH_REQUIRED;
         }
       
@@ -421,7 +429,7 @@ int authenticate_dce_user (request_rec *r)
   /* Save the address of the login context so dce_log_transaction
    * can purge/release it later.
    */
-  set_module_config(r->request_config, &auth_dce_module, login_context);
+  ap_set_module_config(r->request_config, &auth_dce_module, login_context);
                     
 
   /* The server might have failed to fill in the request_rec
@@ -442,13 +450,13 @@ int authenticate_dce_user (request_rec *r)
    * and only set these if the request involves a CGI, but that would
    * be at least as much overhead as just setting them.
    */
-  table_set(r->subprocess_env, "KRB5CCNAME", getenv("KRB5CCNAME"));
+  ap_table_set(r->subprocess_env, "KRB5CCNAME", getenv("KRB5CCNAME"));
 
   /* Only set the password environment variable if explicitly configured
    * to do so.
    */
   if (a->do_include_pw)
-    table_set(r->subprocess_env, "DCEPW", sent_pw);  
+    ap_table_set(r->subprocess_env, "DCEPW", sent_pw);  
   
   log_debug(DEBUG_INFO, "authenticate_dce_user: returning OK",
             r->server);
@@ -465,7 +473,7 @@ int dce_check_authorization (request_rec *r)
 {
   /* Obtain the per-directory configuration for this request */  
   auth_dce_config_rec *a = (auth_dce_config_rec *)
-    get_module_config (r->per_dir_config, &auth_dce_module);
+    ap_get_module_config (r->per_dir_config, &auth_dce_module);
 
   /* Variable to connect to the DCE security registry */
   sec_rgy_handle_t rgy_context = NULL;
@@ -482,7 +490,7 @@ int dce_check_authorization (request_rec *r)
   /* Variables to parse require directives */
   const char *require_list;
   char *require_type, *entity;
-  array_header *requires_array;
+  const array_header *requires_array = ap_requires(r);
   require_line *require_lines;
 
   /* Variables to control loops */
@@ -493,12 +501,12 @@ int dce_check_authorization (request_rec *r)
   int retval = OK;
 
   
-  log_debug(DEBUG_INFO, pstrcat(r->pool,
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool,
                        "dce_check_authorization: called for URI ",
                        r->uri,
                        NULL),
             r->server);
-  log_debug(DEBUG_INFO, pstrcat(r->pool,
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool,
                        "dce_check_authorization: called for filename ",
                        r->filename,
                        NULL),
@@ -514,7 +522,7 @@ int dce_check_authorization (request_rec *r)
 
 
   /* Retrieve the relevant require information for this request */
-  if (!(requires_array = requires(r)))
+  if (!requires_array)
     {
       /* Assume no require information is the same as "require valid-user",
        * and return OK. */
@@ -538,7 +546,7 @@ int dce_check_authorization (request_rec *r)
 
       /* Get require type */
       require_list = require_lines[index].requirement;
-      require_type = getword(r->pool, &require_list, ' ');
+      require_type = ap_getword(r->pool, &require_list, ' ');
 
       if(!strcmp(require_type, "valid-user"))
 	{
@@ -553,7 +561,7 @@ int dce_check_authorization (request_rec *r)
 	   */
 	  while(*require_list)
 	    {
-	      entity = getword_conf(r->pool, &require_list);
+	      entity = ap_getword_conf(r->pool, &require_list);
 	      if(!strcmp(entity, r->connection->user))
 		{
 		  /* Yep, he's there. Return OK. */
@@ -574,7 +582,7 @@ int dce_check_authorization (request_rec *r)
 		  {
 		    dce_error_inq_text(dce_st, dce_error, &dce_error_st);
 		    log_debug(DEBUG_ERROR,
-			      pstrcat(r->pool, "dce_check_authorization: sec_rgy_site_open failed: ", dce_error, NULL),
+			      ap_pstrcat(r->pool, "dce_check_authorization: sec_rgy_site_open failed: ", dce_error, NULL),
 			      r->server);
 		    retval = SERVER_ERROR; done = 1;
 		    break;
@@ -583,7 +591,7 @@ int dce_check_authorization (request_rec *r)
 
             while(*require_list)
 	      {
-		entity = getword_conf(r->pool, &require_list);
+		entity = ap_getword_conf(r->pool, &require_list);
 		if(sec_rgy_pgo_is_member(rgy_context, sec_rgy_domain_group, entity, r->connection->user, &dce_st))
 		  {
 		    retval = OK; done = 1;
@@ -619,15 +627,15 @@ int check_dfs_acl (request_rec *r)
   
   /* Obtain the per-directory configuration for this request */  
   auth_dce_config_rec *a = (auth_dce_config_rec *)
-    get_module_config (r->per_dir_config, &auth_dce_module);
+    ap_get_module_config (r->per_dir_config, &auth_dce_module);
 
   
-  log_debug(DEBUG_INFO, pstrcat(r->pool,
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool,
                        "check_dfs_acl: called for URI ",
                        r->uri,
                        NULL),
             r->server);
-  log_debug(DEBUG_INFO, pstrcat(r->pool,
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool,
                        "check_dfs_acl: called for filename ",
                        r->filename,
                        NULL),
@@ -669,8 +677,8 @@ int check_dfs_acl (request_rec *r)
 	      
 	      while (*indexes)
 		{
-		  char *index = getword_conf(r->pool, &indexes);
-		  char *filename = pstrcat(r->pool, r->filename, slash, index, NULL);
+		  char *index = ap_getword_conf(r->pool, &indexes);
+		  char *filename = ap_pstrcat(r->pool, r->filename, slash, index, NULL);
 		  
 		  if (!stat(filename, &statbuf))
 		    {
@@ -701,13 +709,13 @@ int check_dfs_acl (request_rec *r)
       log_debug(DEBUG_INFO, "check_dfs_acl: file is accessible, returning OK",
                 r->server);
       
-      set_module_config(r->request_config, &auth_dce_module, NULL);
+      ap_set_module_config(r->request_config, &auth_dce_module, NULL);
       return OK;
     }
   else
     {
       /* Permission error. Did the browser send an Authorization header? */
-      if (table_get (r->headers_in, "Authorization"))
+      if (ap_table_get (r->headers_in, "Authorization"))
         {
           /* Yes, it did. Set the request_config variable so
            * authenticate_dce_user() knows to try and get credentials,
@@ -715,7 +723,7 @@ int check_dfs_acl (request_rec *r)
            */
           log_debug(DEBUG_INFO, "check_dfs_acl: file not accessible, Authorization given, returning OK",
                     r->server);
-          set_module_config(r->request_config, &auth_dce_module, (void *)1);
+          ap_set_module_config(r->request_config, &auth_dce_module, (void *)1);
           return OK;
         }
       else
@@ -725,7 +733,7 @@ int check_dfs_acl (request_rec *r)
            */
           log_debug(DEBUG_INFO, "check_dfs_acl: file not accessible, returning AUTH_REQUIRED",
                     r->server);
-          note_basic_auth_failure(r);
+          ap_note_basic_auth_failure(r);
           return AUTH_REQUIRED;
         }
     }
@@ -760,13 +768,13 @@ int dce_log_transaction(request_rec *orig)
    */
   while(r)
     {
-      log_debug(DEBUG_INFO, pstrcat(r->pool,
+      log_debug(DEBUG_INFO, ap_pstrcat(r->pool,
                            "dce_log_transaction: processing URI ",
                            r->uri,
                            NULL),
                 r->server);
 
-      log_debug(DEBUG_INFO, pstrcat(r->pool,
+      log_debug(DEBUG_INFO, ap_pstrcat(r->pool,
                            "dce_log_transaction: processing filename ",
                            r->filename,
                            NULL),
@@ -774,7 +782,7 @@ int dce_log_transaction(request_rec *orig)
 
       /* Get the per-directory configuration information for this request */
       a = (auth_dce_config_rec *)
-        get_module_config (r->per_dir_config, &auth_dce_module);
+        ap_get_module_config (r->per_dir_config, &auth_dce_module);
 
       
       /* If DCE authentication is turned on for this request, check if
@@ -782,7 +790,7 @@ int dce_log_transaction(request_rec *orig)
        */
       if (a->do_auth_dce)
         if ((login_context = (sec_login_handle_t)
-             get_module_config(r->request_config, &auth_dce_module)))
+             ap_get_module_config(r->request_config, &auth_dce_module)))
           {
 #ifdef CACHING
             log_debug(DEBUG_INFO, "dce_log_transaction: releasing a DCE login context",
@@ -821,7 +829,11 @@ module auth_dce_module = {
    check_dfs_acl,		/* check access */
    NULL,			/* type_checker */
    NULL,			/* fixups */
-   dce_log_transaction		/* logger */
+   dce_log_transaction,		/* logger */
+   NULL,                        /* [3] header parser */
+   NULL,                        /* process initializer */
+   NULL,                        /* process exit/cleanup */
+   NULL                         /* [1] post read_request handling */
 };
 
 
@@ -851,7 +863,7 @@ static unsigned int cache_hits = 0;
 static int find_cached_context(request_rec *r, sec_login_handle_t *login_context, char *username, char *password)
 {
   int index;
-  APACHE_MD5_CTX md5_context;
+  AP_MD5_CTX md5_context;
   unsigned char input_digest[16];
   time_t now = time(NULL);
   int count;
@@ -862,12 +874,12 @@ static int find_cached_context(request_rec *r, sec_login_handle_t *login_context
   /* Variable to check the status of the error-code-to-text call */
   int dce_error_st;
 
-  log_debug(DEBUG_INFO, pstrcat(r->pool,
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool,
                        "find_cached_context: called for URI ",
                        r->uri,
                        NULL),
             r->server);
-  log_debug(DEBUG_INFO, pstrcat(r->pool,
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool,
                        "find_cached_context: called for filename ",
                        r->filename,
                        NULL),
@@ -901,10 +913,10 @@ static int find_cached_context(request_rec *r, sec_login_handle_t *login_context
     return FALSE;
 
       
-  apache_MD5Init(&md5_context);
-  apache_MD5Update(&md5_context, username, strlen(username));
-  apache_MD5Update(&md5_context, password, strlen(password));
-  apache_MD5Final(input_digest, &md5_context);
+  ap_MD5Init(&md5_context);
+  ap_MD5Update(&md5_context, username, strlen(username));
+  ap_MD5Update(&md5_context, password, strlen(password));
+  ap_MD5Final(input_digest, &md5_context);
 
   
   index = ((cache_tail+CACHE_SIZE-1)%CACHE_SIZE);
@@ -921,7 +933,7 @@ static int find_cached_context(request_rec *r, sec_login_handle_t *login_context
           if (dce_st)
             {
               dce_error_inq_text(dce_st, dce_error, &dce_error_st);      
-              log_debug(0, pstrcat(r->pool,
+              log_debug(0, ap_pstrcat(r->pool,
                                    "find_cached_context: import/set failed for ",
                                    username, 
                                    " - ",
@@ -949,7 +961,7 @@ static int find_cached_context(request_rec *r, sec_login_handle_t *login_context
 
 static void add_cached_context(request_rec *r, sec_login_handle_t *login_context, char *username, char *password)
 {
-  APACHE_MD5_CTX md5_context;
+  AP_MD5_CTX md5_context;
   time_t now = time(NULL);
   unsigned32 len_used, len_needed;
   error_status_t dce_st;
@@ -960,12 +972,12 @@ static void add_cached_context(request_rec *r, sec_login_handle_t *login_context
   int dce_error_st;
 
 
-  log_debug(DEBUG_INFO, pstrcat(r->pool,
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool,
                        "add_cached_context: called for URI ",
                        r->uri,
                        NULL),
             r->server);
-  log_debug(DEBUG_INFO, pstrcat(r->pool,
+  log_debug(DEBUG_INFO, ap_pstrcat(r->pool,
                        "add_cached_context: called for filename ",
                        r->filename,
                        NULL),
@@ -984,10 +996,10 @@ static void add_cached_context(request_rec *r, sec_login_handle_t *login_context
       cache_size--;
     }
 
-  apache_MD5Init(&md5_context);
-  apache_MD5Update(&md5_context, username, strlen(username));
-  apache_MD5Update(&md5_context, password, strlen(password));
-  apache_MD5Final(context_cache[cache_tail].md5_digest, &md5_context);
+  ap_MD5Init(&md5_context);
+  ap_MD5Update(&md5_context, username, strlen(username));
+  ap_MD5Update(&md5_context, password, strlen(password));
+  ap_MD5Final(context_cache[cache_tail].md5_digest, &md5_context);
 
   context_cache[cache_tail].expire_time = now + CACHE_TTL;
 
@@ -997,7 +1009,7 @@ static void add_cached_context(request_rec *r, sec_login_handle_t *login_context
   if (dce_st)
     {
       dce_error_inq_text(dce_st, dce_error, &dce_error_st);      
-      log_debug(DEBUG_ERROR, pstrcat(r->pool,
+      log_debug(DEBUG_ERROR, ap_pstrcat(r->pool,
                            "add_cached_context: export_context failed - ",
                            dce_error,
                            NULL),

@@ -46,6 +46,13 @@ To operate correctly, mod_auth_dce needs some minor patches to the Apache
 source code. Please see the file README.PATCHES and apply the appropriate
 patch before continuing.
 
+Move the auth_dce subdirectory of the mod_auth_dce distribution to the
+apache/src/modules directory after applying the patch. For example:
+
+     cd /path/to/mod_auth_dce
+     tar cf - auth_dce | (cd /path/to/apache/src/modules && tar xf -)
+
+
 Some implementations of DCE have bugs that prevent mod_auth_dce from
 securely caching login contexts or that don't allow mod_auth_dce to
 give up DCE credentials. Please see the file README.BUGS for details of
@@ -70,16 +77,15 @@ of the cache options, such as the size, expiration time, or size of the
 login context buffer. Please see the mod_auth_dce.c file for details of
 these options. The defaults should be acceptable for most installations.
 
-If you're using Solaris 2.5, Digital Unix 4.0, or IBM AIX 4.x, you do not
-need to edit the Configure script, as the correct libraries are already
-specified. If you're using a different OS or version, you need to edit the
-Configure script and specify the correct libraries for your configuration.
+If you're using Solaris 2.5 or 2.6, Digital Unix 4.0, or IBM AIX 4.x, you
+do not need to edit the Configure script, as the correct libraries are
+already specified. If you're using a different OS or version, you need to
+edit the Configure script and specify the correct libraries for your
+configuration.
 
 Edit the Configuration file, if desired, to change the modules that will be
 built into Apache. If you're using Apache-SSL, you'll also need to edit the
-Configuration file to point to your SSL build directory. Copy
-mod_auth_dce.c to your server build directory. If you're using AIX, also
-copy the file afs_syscall.aix to your build directory. Run the Configure
+Configuration file to point to your SSL build directory. Run the Configure
 script to generate a Makefile, and type make to compile the server. Copy
 the resulting server binary to the appropriate location, and you have
 completed the installation process.
@@ -129,11 +135,12 @@ DCEIncludePW - This directive should appear in a Directory block and takes
                command to potentially acquire plaintext passwords.
 
 
-DCEDirectoryIndex - This directive should appear right next to your current
-                    DirectoryIndex directive, with the same list of valid
-                    index files. If not specified, DCEDirectoryIndex will
-                    default to the same list of index files as
-                    DirectoryIndex does when not specified.
+DCEDirectoryIndex - This directive should appear within a <Directory>
+                    </Directory> section, with the same list of valid
+                    index files as the DirectoryIndex directive. If not
+                    specified, DCEDirectoryIndex will default to the same
+                    list of index files as DirectoryIndex does when not
+                    specified.
 
                     mod_auth_dce needs this information to correctly serve
                     server readable index files in non-server readable
@@ -162,6 +169,7 @@ Sample Configuration
        AuthType Basic
        AuthName Secret Files
        AuthDCE  On
+       DCEDirectoryIndex index.html index.htm index.shtml
        require  user  fred joe frank
        require  group staff
      </Directory>
@@ -180,6 +188,7 @@ Sample AuthDFS Configuration
        AuthName Cal Poly Pomona Intranet
        AuthDCE  On
        AuthDFS  On
+       DCEDirectoryIndex index.html index.htm index.shtml
        require  valid-user
      </Directory>
 
@@ -198,7 +207,7 @@ credentials of the browsing user. This feature can be used to create easy
 to use remote DCE administration CGIs. For an example of the potential of
 this feature, please see
 
-     http://www.csupomona.edu/intranet/services/
+     http://www.csupomona.edu/~intranet/services/
 
 
 The identity of the browser is available to the CGI via the standard
@@ -221,5 +230,5 @@ Please report any bugs or feature requests to <henson@acm.org>.
 
 The latest version of mod_auth_dce is currently available at
 
-http://www.intranet.csupomona.edu/~henson/www/projects/mod_auth_dce/
+http://www.csupomona.edu/~henson/www/projects/mod_auth_dce/
 

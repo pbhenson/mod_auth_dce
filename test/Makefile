@@ -1,21 +1,25 @@
 # Edit the following defines and type make.
 
 # Set to a valid DCE account
-USERNAME=user
+USERNAME=username
 
 # Set to the password for the above account
-USERPASS=pass
+USERPASS=password
 
 # Set to a file in DFS only accessible by the above user
-FILENAME=/dfs/user.file
+FILENAME=/dfs/path/to/file
 
 
 # For Digital DCE 2.0
 #LIBS=-ldce
 
 # For Transarc DCE 1.1
-CC=gcc
-LIBS=-ldce -lsocket -lnsl -lthread -lm
+#CC=gcc
+#LIBS=-ldce -lsocket -lnsl -lthread -lm
+
+# For Transarc DCE 2.0
+CC=gcc -I/usr/include/dce -D_REENTRANT
+LIBS=-ldce
 
 # For AIX DCE
 #CC=xlC_r4 -DAIX
