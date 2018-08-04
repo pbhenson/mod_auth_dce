@@ -10,8 +10,12 @@
 /* Include file to access DCE error text */
 #include <dce/dce_error.h>
 
-/* Include file to access DCE security API */
+/* Include file to access DCE security login API */
 #include <dce/sec_login.h>
+
+/* Include files to access DCE security registry API */
+#include <dce/binding.h>
+#include <dce/pgo.h>
 
 /* Include files to access Apache module API */
 #include "httpd.h"
@@ -21,8 +25,10 @@
 #include "http_protocol.h"
 #include "md5.h"
 
+
 /* Comment out to disable login context caching */
 #define CACHING
+
 
 /* Parameters and prototypes for cache when enabled */
 #ifdef CACHING
@@ -49,6 +55,7 @@ static int find_cached_context(request_rec *r, sec_login_handle_t *, char *, cha
 static void add_cached_context(request_rec *r, sec_login_handle_t *, char *, char *);
 #endif
 
+
 /* We're still debugging... */
 #define DEBUG 0
 
@@ -67,13 +74,16 @@ static void add_cached_context(request_rec *r, sec_login_handle_t *, char *, cha
 #endif
 
 
-
-/* Define module structure for per-directory configuration.
- * The structure has only one member, which determines whether DCE
- * authentication is turned on in a given directory.
+/* Define module structure for per-directory configuration. The
+ * structure has three members. do_auth_dce determines whether DCE
+ * authentication is turned on in a given directory, do_auth_dfs
+ * controls whether the module uses DFS ACLs for authorization,
+ * and index_names lists the possible valid index files for a
+ * directory.
  */
 typedef struct auth_dce_config_struct {
   int do_auth_dce;
+  int do_auth_dfs;
   char *index_names;
 } auth_dce_config_rec;
 
@@ -88,11 +98,10 @@ void *create_auth_dce_dir_config(pool *p, char *d)
 
 
 /* Function that is called to configure a directory when an AuthDCE
- * configuration directive is found.
- * It is passed a flag indicating whether DCE authentication should
- * be enabled in this directory.
+ * configuration directive is found. It is passed a flag indicating
+ * whether DCE authentication should be enabled under this directory.
  */
-char *set_auth_dce(cmd_parms *cmd, void *dv, int arg)
+const char *set_auth_dce(cmd_parms *cmd, void *dv, int arg)
 {
   auth_dce_config_rec *d = (auth_dce_config_rec *)dv;
   
@@ -101,13 +110,30 @@ char *set_auth_dce(cmd_parms *cmd, void *dv, int arg)
   return NULL;
 }
 
+/* Function that is called to configure a directory when an
+ * AuthDFS configuration directive is found. It is passed
+ * a flag indicating whether DFS ACLs should be used for
+ * authorization in this directory.
+ */
+const char *set_auth_dfs(cmd_parms *cmd, void *dv, int arg)
+{
+  auth_dce_config_rec *d = (auth_dce_config_rec *)dv;
+  
+  d->do_auth_dfs = arg;
+  
+  return NULL;
+}
+
+
+/* Function that is called to merge two directory configurations. */
 void *merge_dce_dir_configs(pool *p, void *basev, void *addv)
 {
-  auth_dce_config_rec *new=(auth_dce_config_rec*)pcalloc (p, sizeof(auth_dce_config_rec));
+  auth_dce_config_rec *new = (auth_dce_config_rec*)pcalloc(p, sizeof(auth_dce_config_rec));
   auth_dce_config_rec *base = (auth_dce_config_rec *)basev;
   auth_dce_config_rec *add = (auth_dce_config_rec *)addv;
 
   new->do_auth_dce = add->do_auth_dce;
+  new->do_auth_dfs = add->do_auth_dfs;
   new->index_names = (add->index_names) ? (add->index_names) : (base->index_names);
   
   return new;
@@ -115,15 +141,19 @@ void *merge_dce_dir_configs(pool *p, void *basev, void *addv)
 
 
 /* This structure defines the configuration commands this module
- * is willing to handle.
+ * is willing to handle. As of Apache 1.2, both flag directives
+ * could be set via the built-in set_flag_slot, but that would
+ * break backwards compatibility with 1.1.3.
  */
 command_rec auth_dce_cmds[] = {
-{ "AuthDCE", set_auth_dce, NULL, OR_AUTHCFG, FLAG,
-  "Perform DCE authentication in this directory?" },
-{ "DCEDirectoryIndex", set_string_slot,
+  { "AuthDCE", set_auth_dce, NULL, OR_AUTHCFG, FLAG,
+    "Perform DCE authentication in this directory?" },
+  { "AuthDFS", set_auth_dfs, NULL, OR_AUTHCFG, FLAG,
+    "Use DFS ACLs for authorization in this directory?" },
+  { "DCEDirectoryIndex", set_string_slot,
     (void*)XtOffsetOf(auth_dce_config_rec, index_names),
     OR_INDEXES, RAW_ARGS, NULL },
-{ NULL }
+  { NULL }
 };
 
 
@@ -133,8 +163,7 @@ command_rec auth_dce_cmds[] = {
 module auth_dce_module;
 
 
-/* Function to verify DCE username/password and obtain network credentials
- */
+/* Function to verify DCE username/password and obtain network credentials. */
 int authenticate_dce_user (request_rec *r)
 {
   /* Store password sent by the user */
@@ -169,6 +198,7 @@ int authenticate_dce_user (request_rec *r)
   auth_dce_config_rec *a = (auth_dce_config_rec *)
     get_module_config (r->per_dir_config, &auth_dce_module);
 
+  
   log_debug(DEBUG_INFO, pstrcat(r->pool, "authenticate_dce_user: called for URI ",
                        r->uri, NULL), r->server);
 
@@ -184,9 +214,9 @@ int authenticate_dce_user (request_rec *r)
     }
 
   
-  /* If check_dce_access() didn't set the request_config variable, we don't
+  /* If check_dfs_acl() didn't set the request_config variable, we don't
    * need credentials to complete the request. Return OK without bothering
-   * with DCE calls
+   * with DCE calls.
    */
   if (!get_module_config(r->request_config, &auth_dce_module))
     {
@@ -209,10 +239,10 @@ int authenticate_dce_user (request_rec *r)
   log_debug(DEBUG_INFO, pstrcat(r->pool, "authenticate_dce_user: request made by user ",
                        r->connection->user, NULL), r->server);
 
-  /*  log_debug(DEBUG_INFO, pstrcat(r->pool, "authenticate_dce_user: password is  ",
-                       sent_pw, NULL), r->server);
-                       */
-
+  /* log_debug(DEBUG_INFO, pstrcat(r->pool, "authenticate_dce_user: password is  ",
+   *                               sent_pw, NULL), r->server);
+   */
+  
 
 #ifdef CACHING
   if (!find_cached_context(r, &login_context, r->connection->user, sent_pw))
@@ -394,48 +424,158 @@ int authenticate_dce_user (request_rec *r)
 }
 
 
-/* Function to return OK for the group check if DCE authentication is
- * turned on
+/* Function to check the web server configuration to determine whether
+ * the user is authorized for this request.
  */
-int fake_dce_group_check (request_rec *r)
+int dce_check_authorization (request_rec *r)
 {
   /* Obtain the per-directory configuration for this request */  
   auth_dce_config_rec *a = (auth_dce_config_rec *)
     get_module_config (r->per_dir_config, &auth_dce_module);
 
+  /* Variable to connect to the DCE security registry */
+  sec_rgy_handle_t rgy_context = NULL;
+
+  /* DCE functions return status in this variable */
+  error_status_t dce_st;
+  
+  /* String to store text for a given error code */
+  dce_error_string_t dce_error;
+
+  /* Variable to check the status of the error-code-to-text call */
+  int dce_error_st;
+
+  /* Variables to parse require directives */
+  const char *require_list;
+  char *require_type, *entity;
+  array_header *requires_array;
+  require_line *require_lines;
+
+  /* Variables to control loops */
+  int index;
+  int done = 0;
+
+  /* Store the value to be returned from this function */
+  int retval = OK;
+
   
   log_debug(DEBUG_INFO, pstrcat(r->pool,
-                       "fake_dce_group_check: called for URI ",
+                       "dce_check_authorization: called for URI ",
                        r->uri,
                        NULL),
             r->server);
   log_debug(DEBUG_INFO, pstrcat(r->pool,
-                       "fake_dce_group_check: called for filename ",
+                       "dce_check_authorization: called for filename ",
                        r->filename,
                        NULL),
             r->server);
 
 
-  /* Is DCE authentication turned on for this request? If so, return OK.
-   * if not, decline it */
-  if (a->do_auth_dce)
+  /* Is DCE authentication turned on for this request? If not, decline it */
+  if (!a->do_auth_dce)
     {
-      log_debug(DEBUG_INFO, "check_dce_access: do_auth_dce set, returning OK",
-                r->server);
-      return OK;
-    }
-  else
-    {
-      log_debug(DEBUG_INFO, "check_dce_access: do_auth_dce not set, returning DECLINED",
-                r->server);
+      log_debug(DEBUG_INFO, "dce_check_authorization: do_auth_dce not set, returning DECLINED", r->server);
       return DECLINED;
     }
+
+
+  /* Retrieve the relevant require information for this request */
+  if (!(requires_array = requires(r)))
+    {
+      /* Assume no require information is the same as "require valid-user",
+       * and return OK. */
+      log_debug(DEBUG_INFO, "dce_check_authorization: no requires line, returning OK", r->server);
+      return (OK);
+    }
+
+
+  /* Loop through each require entry */
+  require_lines = (require_line *)requires_array->elts;
+  for(index = 0; (index < requires_array->nelts) && (!done); index++)
+    {
+      /* If the require entry doesn't apply to this request, skip the loop */
+      if (!(require_lines[index].method_mask & (1 << r->method_number)))
+	continue;
+
+      /* We've found a require entry that limits access for this request. Assume
+       * request is forbidden unless we determine otherwise.
+       */
+      retval = FORBIDDEN;
+
+      /* Get require type */
+      require_list = require_lines[index].requirement;
+      require_type = getword(r->pool, &require_list, ' ');
+
+      if(!strcmp(require_type, "valid-user"))
+	{
+	  /* If the type is valid-user, anybody is fine, so return OK. */
+	  retval = OK; done = 1;
+	  break;
+	}
+      else if(!strcmp(require_type, "user"))
+	{
+	  /* If the type is user, check all users listed on the require entry to
+	   * see if the requesting user is one of them.
+	   */
+	  while(*require_list)
+	    {
+	      entity = getword_conf(r->pool, &require_list);
+	      if(!strcmp(entity, r->connection->user))
+		{
+		  /* Yep, he's there. Return OK. */
+		  retval = OK; done = 1;
+		  break;
+		}
+	    }
+	}
+        else if(!strcmp(require_type, "group"))
+	  {
+	    /* If the type is group, check each group listed on the require entry to
+	     * see if the requesting user is a member.
+	     */
+	    if (!rgy_context)
+	      {
+		sec_rgy_site_open(NULL, &rgy_context, &dce_st);
+		if (dce_st)
+		  {
+		    dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+		    log_debug(DEBUG_ERROR,
+			      pstrcat(r->pool, "dce_check_authorization: sec_rgy_site_open failed: ", dce_error, NULL),
+			      r->server);
+		    retval = SERVER_ERROR; done = 1;
+		    break;
+		  }
+	      }
+
+            while(*require_list)
+	      {
+		entity = getword_conf(r->pool, &require_list);
+		if(sec_rgy_pgo_is_member(rgy_context, sec_rgy_domain_group, entity, r->connection->user, &dce_st))
+		  {
+		    retval = OK; done = 1;
+		    break;
+		  }
+	      }
+	  }
+    }
+
+  /* Clean up if we connected to the security server. */
+  if (rgy_context)
+    sec_rgy_site_close(rgy_context, &dce_st);
+
+  /* Retval is either OK if none of the require entries matched this request,
+   * FORBIDDEN if an entry matched and didn't allow the user, or OK if an entry
+   * matched and did allow this user.
+   */
+  return retval;
 }
 
-/* Function to check whether the server has sufficient access for the request,
- * or whether it needs credentials
+
+/* Function to check the DFS ACL for the request and see if the server
+ * requires authentication to access it. Only relevant if AuthDFS is
+ * enabled.
  */
-int check_dce_access (request_rec *r)
+int check_dfs_acl (request_rec *r)
 {
   /* Unix structure for accessing file information */
   struct stat statbuf;
@@ -449,12 +589,12 @@ int check_dce_access (request_rec *r)
 
   
   log_debug(DEBUG_INFO, pstrcat(r->pool,
-                       "check_dce_access: called for URI ",
+                       "check_dfs_acl: called for URI ",
                        r->uri,
                        NULL),
             r->server);
   log_debug(DEBUG_INFO, pstrcat(r->pool,
-                       "check_dce_access: called for filename ",
+                       "check_dfs_acl: called for filename ",
                        r->filename,
                        NULL),
             r->server);
@@ -463,52 +603,59 @@ int check_dce_access (request_rec *r)
   /* Is DCE authentication turned on for this request? If not, decline it */
   if (!a->do_auth_dce)
     {
-      log_debug(DEBUG_INFO, "check_dce_access: do_auth_dce not set, returning DECLINED",
+      log_debug(DEBUG_INFO, "check_dfs_acl: do_auth_dce not set, returning DECLINED",
                 r->server);
       return DECLINED;
     }
 
-    
-  /* Check whether we can get to the file. First we stat() it, then we check
-   * for the correct permissions for the type of request. If anything fails
-   * due to permission errors, the file is not accessible. If we get any
-   * other type of error, just say the file is accessible and let the
-   * server handle it. We also need to check for an index file if the URL
-   * is for a directory.
+
+  /* If AuthDFS is not set for this request, then request authentication regardless
+   * of file protections.
    */
-  if(stat(r->filename, &statbuf))
-    accessible = (errno != EACCES);
-  else if (S_ISDIR(statbuf.st_mode))
-    {
-      if (r->uri[strlen(r->uri)-1] == '/')
-        {
-          char *indexes = (a->index_names) ? (a->index_names) : (DEFAULT_INDEX);
-          char *slash = (r->filename[strlen(r->filename)-1] == '/') ? "" : "/";
-          int access_required = R_OK | X_OK;
-          
-          while (*indexes)
-            {
-              char *index = getword_conf(r->pool, &indexes);
-              char *filename = pstrcat(r->pool, r->filename, slash, index, NULL);
-
-              if (!stat(filename, &statbuf))
-                {
-                  r->filename = filename;
-                  access_required = R_OK;
-                  break;
-                }
-            }
-
-          if (access(r->filename, access_required))
-            accessible = (errno != EACCES);
-        }
-    }
+  if (!a->do_auth_dfs)
+    accessible = 0;
   else
     {
-      if (access(r->filename, R_OK))
-        accessible = (errno != EACCES);
+      /* Check whether we can get to the file. First we stat() it, then we check
+       * for the correct permissions for the type of request. If anything fails
+       * due to permission errors, the file is not accessible. If we get any
+       * other type of error, just say the file is accessible and let the
+       * server handle it. We also need to check for an index file if the URL
+       * is for a directory.
+       */
+      if(stat(r->filename, &statbuf))
+	accessible = (errno != EACCES);
+      else if (S_ISDIR(statbuf.st_mode))
+	{
+	  if (r->uri[strlen(r->uri)-1] == '/')
+	    {
+	      const char *indexes = (a->index_names) ? (a->index_names) : (DEFAULT_INDEX);
+	      char *slash = (r->filename[strlen(r->filename)-1] == '/') ? "" : "/";
+	      int access_required = R_OK | X_OK;
+	      
+	      while (*indexes)
+		{
+		  char *index = getword_conf(r->pool, &indexes);
+		  char *filename = pstrcat(r->pool, r->filename, slash, index, NULL);
+		  
+		  if (!stat(filename, &statbuf))
+		    {
+		      r->filename = filename;
+		      access_required = R_OK;
+		      break;
+		    }
+		}
+	      
+	      if (access(r->filename, access_required))
+		accessible = (errno != EACCES);
+	    }
+	}
+      else
+	{
+	  if (access(r->filename, R_OK))
+	    accessible = (errno != EACCES);
+	}
     }
-      
 
   if (accessible)
     {
@@ -517,7 +664,7 @@ int check_dce_access (request_rec *r)
        * OK.
        */
 
-      log_debug(DEBUG_INFO, "check_dce_access: file is accessible, returning OK",
+      log_debug(DEBUG_INFO, "check_dfs_acl: file is accessible, returning OK",
                 r->server);
       
       set_module_config(r->request_config, &auth_dce_module, NULL);
@@ -532,7 +679,7 @@ int check_dce_access (request_rec *r)
            * authenticate_dce_user() knows to try and get credentials,
            * and then return OK.
            */
-          log_debug(DEBUG_INFO, "check_dce_access: file not accessible, Authorization given, returning OK",
+          log_debug(DEBUG_INFO, "check_dfs_acl: file not accessible, Authorization given, returning OK",
                     r->server);
           set_module_config(r->request_config, &auth_dce_module, (void *)1);
           return OK;
@@ -542,7 +689,7 @@ int check_dce_access (request_rec *r)
           /* No Authorization header. Tell the browser it needs to send
            * authorization information.
            */
-          log_debug(DEBUG_INFO, "check_dce_access: file not accessible, returning AUTH_REQUIRED",
+          log_debug(DEBUG_INFO, "check_dfs_acl: file not accessible, returning AUTH_REQUIRED",
                     r->server);
           note_basic_auth_failure(r);
           return AUTH_REQUIRED;
@@ -552,7 +699,8 @@ int check_dce_access (request_rec *r)
 
 
 /* This function checks whether credentials were obtained for this request,
- * and if so, purges them
+ * and if so, purges them or releases them, depending on whether caching is
+ * enabled.
  */
 int dce_log_transaction(request_rec *orig)
 {
@@ -635,8 +783,8 @@ module auth_dce_module = {
    NULL,			/* handlers */
    NULL,			/* filename translation */
    authenticate_dce_user,	/* check_user_id */
-   fake_dce_group_check,	/* check auth */
-   check_dce_access,		/* check access */
+   dce_check_authorization,	/* check auth */
+   check_dfs_acl,		/* check access */
    NULL,			/* type_checker */
    NULL,			/* fixups */
    dce_log_transaction		/* logger */

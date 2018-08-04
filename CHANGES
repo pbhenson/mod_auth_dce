@@ -1,3 +1,13 @@
+1.2 - Added support for Apache 1.2.0 and included a patch file for that
+      version.
+
+    - Added ability to use web server configuration for authorization.
+      Sites without DFS ACLs can now use DCE for authentication, while
+      relying on require directives for authorization. Added new
+      configuration directive, AuthDFS, to allow both web server based
+      and DFS ACL based authorization.
+
+
 1.0 - Patch for Apache 1.1.3 appeared to be for a nonexistant version 1.3.2,
       renamed patch and updated README.PATCHES.
 

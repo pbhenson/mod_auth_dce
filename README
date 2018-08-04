@@ -2,28 +2,41 @@
 Introduction
 ------------
 
-mod_auth_dce is an Apache module for DCE based authentication and secure
-access to DFS via the HTTP protocol. It allows you to use the DCE Security
-Registry to authenticate remote browsers, and to protect files via DFS
-ACLs.
+mod_auth_dce is an Apache module for DCE based authentication. It allows
+you to use the DCE security registry to authenticate remote browsers. You
+can control access to files either via standard web server configuration
+directives, or via DFS ACLs.
 
+With mod_auth_dce, you can supply DCE users and DCE groups to the Apache
+require directive, and restrict access to files or resources so only the
+listed users or groups can access them. In this mode, mod_auth_dce will
+request authentication from the browser on every request.
 
+When used with DFS, mod_auth_dce can also use DFS ACLs for
+authorization. In this mode, mod_auth_dce will check the DFS ACL for each
+request. If the file requested is readable by the server, it will be served
+with no authentication required. If the file is not readable by the server,
+mod_auth_dce will request authentication from the browser and use it to
+obtain DCE credentials for the browsing user. The request will be
+reprocessed using the DCE identity of the browser, and if the file
+requested is readable by that user, it will be served. Otherwise, the
+request will be forbidden.
 
-File Manifest
--------------
+mod_auth_dce is most useful when combined with DFS. Once mod_auth_dce has
+been installed, access to files can be controlled simply by setting DFS
+ACLs, with no further web server configuration required. However, support
+of standard web server configuration directives allows mod_auth_dce to be
+useful at sites without DFS, and also for protecting resources that are not
+files, such as Apache handlers.
 
-  COPYRIGHT - Copyright details
-  CHANGES - What's new in this version
-  README - Installation and configuration instructions
-  README.BUGS - Information about bugs in different DCE implementations
-  README.PATCHES - Information about patches
-  THANKS - Acknowledgements
-  mod_auth_dce.c - Source code for module
-  patches/apache-1.3.2.diff - Patch file for Apache 1.3.2
-  patches/stronghold-1.3.4.diff - Patch file for Stronghold 1.3.4
-  test/Makefile - Makefile for security testing program
-  test/test.c - Security testing program
+Other features of mod_auth_dce include login context caching, and DCE
+authenticated CGI execution.
 
+mod_auth_dce currently uses standard Basic authentication to get the
+username and password. With stock Apache, this means the password is
+transmitted in cleartext. However, with Stronghold, the password will
+be encrypted if SSL is used. A future release might support Kerberos
+authentication to avoid the cleartext password problem.
 
 
 Installation
@@ -43,114 +56,146 @@ uncommenting the appropriate libraries or defining your own. You also
 need to supply a valid DCE username/password, and the location of a file
 in DFS accessible only to that user. Please see the Makefile for details.
 Once the Makefile has been edited, just type make, and the test program
-will check that there are no bugs in the DCE calls mod_auth_dce makes.
+will verify that there are no bugs in the DCE calls mod_auth_dce makes.
 
 By default, mod_auth_dce has login context caching turned on. The caching
 should increase performance, but more importantly, will significantly
 decrease the load on your security server. However, if the README.BUGS
 file or the test program indicates your implementation can not utilize
 caching securely, you should edit the mod_auth_dce.c file and follow
-the intructions in it to disable caching.
+the instructions in it to disable caching.
 
 You should also edit the mod_auth_dce.c file if you want to change any
 of the cache options, such as the size, expiration time, or size of the
 login context buffer. Please see the mod_auth_dce.c file for details of
 these options. The defaults should be acceptable for most installations.
 
-Next, edit the Configuration file. Uncomment the correct library
-definitions for your implementation, or add your own if no defaults are
-available for your platform. Run the Configure program to generate a
-Makefile. Copy mod_auth_dce.c to your server build directory, and type
-make to compile the server. Copy the resulting server binary to the
-appropriate location, and you have completed the installation process.
+For Apache 1.2.0 or newer, you do not need to edit the Configure script
+if you're using Solaris 2.5/Transarc DCE 1.1 or Digital Unix 4.0/Digital
+DCE 2.0, as the correct libraries are already specified. If you're using
+a different OS or DCE version, you need to edit the Configure script and
+specify the correct libraries for your configuration.
+
+If you're using an older version of Apache, edit the Configuration file.
+Uncomment the correct library definitions for your implementation, or add
+your own if no defaults are available for your platform.
+
+Run the Configure script to generate a Makefile. Copy mod_auth_dce.c to
+your server build directory, and type make to compile the server. Copy the
+resulting server binary to the appropriate location, and you have completed
+the installation process.
 
 
+Configuration Directives and Notes
+----------------------------------
 
-Configuration
--------------
-
-To correctly serve index files, you need to add a "DCEDirectoryIndex"
-command right next to your current "DirectoryIndex" command, with the
-same options. If you currently have no "DirectoryIndex" command, then
-mod_auth_dce will use the same default indexes for "DCEDirectoryIndex"
-as are used for "DirectoryIndex".
-
-The only other configuration option is "AuthDCE", which should appear in
-a Directory block and takes either "On" or "Off" as an argument.
-mod_auth_dce currently uses standard Basic authorization to get the
-username and password. With stock Apache, this means the password is
-transmitted in cleartext. However, with Stronghold, the password will
-be encrypted if SSL is used. A future release might support Kerberos
-authentication to avoid the cleartext password problem.
-
-The following is a sample configuration. The directory heirarchy rooted at
-/dfs has DCE authentication turned on. Any valid user is acceptable, as
-the decision whether to grant access is based on the actual DFS ACLs. If
-the user does not have access based on the ACL, he will receive a Forbidden
-error from the server.
+NOTE: The default behavior of mod_auth_dce has *changed* as of version
+      1.2. If you are upgrading from a version older than 1.2, be sure to
+      change your current configuration if you wish to maintain the
+      previous behavior.
 
 
-     <Directory /dfs>
-       AuthType Basic
-       AuthName Cal Poly Pomona Intranet
-       AuthDCE  On
-       require  valid-user
-     </Directory>
+AuthDCE - This directive should appear in a Directory block and takes
+          either "On" or "Off" as an argument. It defaults to "Off".
+          Setting it to "On" will enable DCE authentication within 
+          the directory specified.
+
+          You will also need valid AuthType, AuthName, and require
+          directives in the Directory block. Currently, the only supported
+          AuthType is "Basic". List the authorized users/groups for this
+          directory in the require directive, or see below for correct
+          require configuration if AuthDFS is enabled.
 
 
-Note that this configuration does not imply that a password is requested
-for *all* files under this directory. Only files not readable by the 
-any_other entry will result in a request for authorization. When a request
-is made for a location under /dfs, the server first tries to access the
-file without credentials. This will only succeed if the ACL for that file
-includes read permission for any_other. If access is denied, the server
-will request a username/password from the browser. The server will try to
-acquire DCE credentials with the username/password, and if that succeeds,
-will retry the request with the privileges of the browser. If the file
-can now be accessed, the request continues transparently. Otherwise, the
-request is refused.
+AuthDFS - This directive should appear in a Directory block and takes
+          either "On" or "Off" as an argument. It defaults to "Off".
+          Setting it to "On" will enable DFS ACL checking within
+          the directory specified. When AuthDFS is on, mod_auth_dce
+          will only request authentication if the request is for a file
+          not readable by the server. If the server is running with no DCE
+          credentials, server readability is controlled by the "any_other"
+          entry on the DFS ACL. Otherwise, it is controlled by the entries
+          that apply to the DCE identity of the server.
 
-Note that if your cgi-bin directory is under /dfs, you can also protect
-CGIs with DFS ACLs. Not only do you restrict access to them, but when
-they run, they also have full DCE credentials of the browsing user. This
-feature can be used to create easy to use remote DCE administration
-CGIs. For an example of the potential of this feature, please see
+          When AuthDFS is enabled, your require directive should be set to
+          "valid-user".
 
-     http://www.csupomona.edu/intranet/services/
 
-Be aware that the browser's DCE password is passed to the CGI, for some
-DCE administration commands that require it. You shouldn't allow untrusted
-users to place CGIs in a DCE authenticated location, as they could then
-have their CGI run with a browser's credentials and steal the browser's
-password.
+DCEDirectoryIndex - This directive should appear right next to your current
+                    DirectoryIndex directive, with the same list of valid
+                    index files. If not specified, DCEDirectoryIndex will
+                    default to the same list of index files as
+                    DirectoryIndex does when not specified.
+
+                    mod_auth_dce needs this information to correctly serve
+                    server readable index files in non-server readable
+                    directories when AuthDFS is enabled. Unfortunately, the
+                    list already specified with DirectoryIndex is not
+                    available to mod_auth_dce, necessitating this seemingly
+                    reduntant directive.
+
 
 Checking for symlinks and .htaccess files will not work reliably with
 this module, because the checks are made before credentials are obtained,
 and the server might not be able to read the directories at that time.
 It is recommended that symlinks be enabled and .htaccess files be disabled
-in any directory heirarchy in which DCE authentication is enabled.
+in any directory hierarchy in which DCE authentication is enabled.
 
 
+Sample Configuration
+--------------------
 
-Protecting Files
-----------------
+     <Directory /path/to/private>
+       AuthType Basic
+       AuthName Secret Files
+       AuthDCE  On
+       require  user  fred joe frank
+       require  group staff
+     </Directory>
 
-Now that you've finished installing and configuring mod_auth_dce, you
-can begin serving DFS files securely. For a file that you do not want to
-protect, make sure that all directories leading to the file have execute
-access for the any_other entry, and that the file itself has read access
-for the any_other entry. If you wish to make a file private, simply set
-an appropriate ACL on the file. Note that in addition to having read
-privileges on the file, you must make sure that all users you want to
-have access have execute privileges on all directories leading to the
-file.
 
-The ACL you set on the file will be fully respected by the web server.
-If the file is readable by any_other, it will be served to any requesting
-browser with no authentication requested. Otherwise, the server will
-request authorization from the browser, and attempt to access the file
-using the browser's DCE credentials.
+This configuration protects all files located under the /path/to/private
+directory. Only the listed DCE users or members of the listed DCE groups
+are allowed to access these files.
 
+
+Sample AuthDFS Configuration
+----------------------------
+
+     <Directory /dfs>
+       AuthType Basic
+       AuthName Cal Poly Pomona Intranet
+       AuthDCE  On
+       AuthDFS  On
+       require  valid-user
+     </Directory>
+
+
+This configuration protects all files located under the /dfs directory.
+DFS ACLs are used for authorization. Authentication is only requested when
+a file is not readable by the server user.
+
+
+DCE Authenticated CGIs
+----------------------
+
+If you use DCE authentication for your cgi-bin directory, you can not only
+restrict access to them, but when they run, they also have full DCE
+credentials of the browsing user. This feature can be used to create easy
+to use remote DCE administration CGIs. For an example of the potential of
+this feature, please see
+
+     http://www.csupomona.edu/intranet/services/
+
+
+The identity of the browser is available to the CGI via the standard
+REMOTE_USER environment variable.
+
+The browser's DCE password is also available to the CGI via the DCEPW
+environment variable, for DCE administration commands that require it.
+You shouldn't allow untrusted users to place CGIs in a DCE authenticated
+location, as they could then have their CGI run with a browser's
+credentials and steal the browser's password.
 
 
 Feedback/Availability
