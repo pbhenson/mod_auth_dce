@@ -1,0 +1,19 @@
+
+This file lists the people who have contributed to the development of
+mod_auth_dce.
+
+
+Dr. Craig Rich, Intranet Project Director, Cal Poly Pomona
+  -- Vision and design of the Cal Poly Pomona Intranet Project
+     (http://www.csupomona.edu/intranet/), which inspired the creation
+     of this module.
+
+
+Steve Moyer, DFS Forward Development, Transarc Corporation
+  -- Invaluable technical support and advice on DFS issues.
+
+
+Doug MacEachern, OSF Research Institute
+  -- Developed DCE-Perl (http://www.osf.org/~dougm/perl/), allowing
+     CGIs written in perl to directly access the DCE API, and suggested
+     the DCE API routines to implement context caching.
