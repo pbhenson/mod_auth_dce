@@ -3,35 +3,26 @@ Installing Patches
 ------------------
 
 This module currently requires a few minor patches to the Apache source
-code for correct operation. In the patches subdirectory, you'll find two
-patch files:
+code for correct operation. In the patches subdirectory, you'll find a 
+patch file:
 
 
-     apache-1.3.3.diff              -- For Apache 1.3.3
-     apache-1.3.3+ssl_1.29.diff     -- For Apache 1.3.3+ssl1.29
+     apache-1.3.9+.diff     -- For Apache 1.3.9 and later
 
 
-To apply the patch to Apache 1.3.3, run the command:
+This patch should apply (with possible offset complaints) to Apache 1.3.9
+and later, including SSL variants thereof.  To apply the patch, run
+the command:
 
 
-     patch -p1 -d /path/to/apache_1.3.3 < \
-          /path/to/mod_auth_dce-2.2/patches/apache-1.3.3.diff
-
-
-To apply the patch to Apache 1.3.3+ssl1.29, first be sure you have already
-applied the SSL patch to the Apache 1.3.3 distribution. Then, run the
-command:
-
-
-     patch -p1 -d /path/to/apache_1.3.3+ssl1.29 < \
-          /path/to/mod_auth_dce-2.2/patches/apache-1.3.3+ssl_1.29.diff
-
+     patch -p1 -d /path/to/apache_1.3.9 < \
+          /path/to/mod_auth_dce-2.5/patches/apache-1.3.9+.diff
 
 
 Technical Details
 -----------------
 
-The following is a list of files modified by the patches and the reasons
+The following is a list of files modified by the patch and the reasons
 the modifications needed to be made.
 
   mod_cgi.c
@@ -62,14 +53,13 @@ the modifications needed to be made.
        This function is also changed to no longer be static, so it may be
        called from mod_auth_dce.
 
+       Also in get_path_info(), if a DFS server is down, the stat() call
+       could return ETIMEDOUT. Stock Apache will return HTTP_FORBIDDEN in
+       this case, which seems wrong. Instead, the function is modified
+       to return HTTP_SERVICE_UNAVAILABLE.
 
-  Configuration
+  mod_userdir.c
 
-       An AddModule line is added for mod_auth_dce, and the list of modules
-       to include is modified to my liking ;).
-
-
-  Configure
-
-       The C compiler, C flags, libraries, and ld flags are modified for
-       DCE support for Solaris, Digital Unix, and AIX.
+       Similar to the get_path_info() function, a stat() call in
+       mod_userdir could return ETIMEDOUT. In this case, the function
+       is modified to return HTTP_SERVICE_UNAVAILABLE.

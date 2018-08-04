@@ -36,22 +36,15 @@ authenticated CGI execution.
 
 mod_auth_dce currently uses standard Basic authentication to get the
 username and password. With stock Apache, this means the password is
-transmitted in cleartext. However, if Apache-SSL is used, the password can
-be encrypted.
+transmitted in cleartext. However, if SSL is used, the password can be
+encrypted.
 
 
 Installation
 ------------
 
-NOTE: mod_auth_dce does not support the new Apache configuration mechanism
-      using the configure command. You need to use the original Configure
-      command to generate a Makefile in order to compile Apache with DCE
-      support.
-
-
 To operate correctly, mod_auth_dce needs some minor patches to the Apache
-source code. Please see the file README.PATCHES and apply the appropriate
-patch before continuing.
+source code. Please see the file README.PATCHES and apply the patch file.
 
 Move the auth_dce subdirectory of the mod_auth_dce distribution to the
 apache/src/modules directory after applying the patch. For example:
@@ -71,18 +64,16 @@ of the cache options, such as the size or expiration time. Please see the
 mod_auth_dce.c file for details of these options. The defaults should be
 acceptable for most installations.
 
-If you're using Solaris 2.5 or 2.6, Digital Unix 4.0, or IBM AIX 4.x, you
-do not need to edit the Configure script, as the correct libraries are
-already specified. If you're using a different OS or version, you need to
-edit the Configure script and specify the correct libraries for your
-configuration.
+If you are using the Apache Autoconf-style Interface (APACI), supply the
+option '--activate-module=src/modules/auth_dce/mod_auth_dce.c' to
+configure. Otherwise, edit the Configuration file and add the line
 
-Edit the Configuration file, if desired, to change the modules that will be
-built into Apache. If you're using Apache-SSL, you'll also need to edit the
-Configuration file to point to your SSL build directory. Run the Configure
-script to generate a Makefile, and type make to compile the server. Copy
-the resulting server binary to the appropriate location, and you have
-completed the installation process.
+     AddModule modules/auth_dce/mod_auth_dce.o
+
+In either case, mod_auth_dce will attempt to set compilation options
+appropriately during the configuration process. If mod_auth_dce doesn't
+recognize your OS, it will complain and use defaults that may or may
+not work.
 
 
 Configuration Directives

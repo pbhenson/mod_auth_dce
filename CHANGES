@@ -1,3 +1,10 @@
+2.5 - Updated logging code to use 1.3 API.
+
+    - Updated configuration to utilize 1.3 auto-configure capabilities.
+
+    - Updated patch for Apache 1.3.9.
+
+
 2.2 - Updated module to correctly handle proxy authentication. Thanks to
       Thomas R. Stevenson <aa0026@wayne.edu> for pointing out the problem.
 
