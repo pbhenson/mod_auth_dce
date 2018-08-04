@@ -354,6 +354,9 @@ void auth_dce_find_cached_context(request_rec *r, request_config_rec *request_co
       
       pthread_delay_np(&sleep_interval);
     }
+#ifdef CACHE_TEST_LEVEL
+#undef username
+#endif
 }
 
 void auth_dce_add_cached_context(request_rec *r, request_config_rec *request_config) {

@@ -83,6 +83,10 @@ time. By default, processes will log cache statistics every 500
 authenticated accesses. To disable statistics generation or change its
 frequency, edit the mod_auth_dce.h file.
 
+If DFS is not running on your web server, you'll need to edit the
+mod_auth_dce.h file and comment out the '#define WITH_DFS' line before
+compiling.
+
 
 Configuration Directives
 ------------------------

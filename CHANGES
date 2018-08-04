@@ -1,3 +1,35 @@
+3.1 - The sec_login_context_from_pag call was not available under
+      AIX. According to IBM Technical Support, this call should now be
+      available with the latest PTF set for AIX DCE. Contact IBM
+      Technical Support for further details. Thanks to Sue Butala
+      at Transarc technical support for her help with this issue and
+      many others.
+
+    - It seems that macros with a variable number of arguments are a
+      gcc extension, and other compilers generate errors processing
+      them. Those macros have been modified so that warnings will occur
+      rather than errors when using a compiler other than gcc.
+      Generating debugging output, which relies on variable-argument
+      macros, is only supported when using gcc. If you are unable to use
+      gcc, I suggest you request that your compiler vendor implement
+      these useful preprocessor extensions.
+
+    - Fixed sec_login_context_from_pag typo. Thanks to Titus J. Anderson
+      <titus.anderson@louisville.edu> for pointing it out.
+
+    - Misuse of the apache check_access API stage broke the Satisfy
+      directive, and possibly other IP access control mechanisms.
+      Updated API usage to resolve these issues. Thanks to Ken Hagan
+      <khhaga01@louisville.edu> for reporting this problem.
+
+    - The sec_login_inq_pag call seems to return invalid data when the
+      DFS client is not installed and configured. Added a compile-time
+      directive to determine whether DFS support is available, and
+      implemented a replacement mechanism for obtaining the pag when it
+      is not. Thanks to Joel W. Murphy <jmurphy@cnu.acsu.buffalo.edu>
+      for reporting this problem.
+
+
 3.0 - Implemented new shared memory context cache, with the following
       new configuration directives: AuthDCECacheBuckets,
       AuthDCECacheLifetime, AuthDCECacheMaxIdle, AuthDCECacheGracePeriod,

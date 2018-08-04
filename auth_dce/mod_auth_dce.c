@@ -84,6 +84,26 @@ static char *krb5_env_pag = krb5_env+57;
 static unsigned32 server_pag = 0;
 #endif
 
+#ifndef WITH_DFS
+static unsigned long sec_login_inq_pag_no_dfs(void *dummy, error_status_t *dce_st)
+{
+  char *krb5ccname = getenv("KRB5CCNAME");
+  *dce_st = 0;
+  
+  if (krb5ccname)
+    {
+      int len = strlen(krb5ccname);
+      if (len >= 8)
+	return (unsigned long)strtol(krb5ccname + len - 8, (char **)NULL, 16);
+    }
+  
+  return 0;
+}
+#define sec_login_inq_pag(X, Y) sec_login_inq_pag_no_dfs(X, Y)
+#define installpag(X)
+#define resetpag()
+#endif
+
 static sec_login_handle_t server_context = NULL;
 
 
@@ -155,7 +175,7 @@ static pthread_addr_t refresh_context(pthread_addr_t arg)
     }		   
 }
 
-
+#ifndef NO_CACHING
 void auth_dce_purge_context(server_rec *s, unsigned long pag)
 {
   sec_login_handle_t login_context;
@@ -176,7 +196,7 @@ void auth_dce_purge_context(server_rec *s, unsigned long pag)
   
   sec_login_purge_context(&login_context, &dce_st);
 }	
-
+#endif
 
 static void *create_server_config(pool *p, server_rec *s)
 {
@@ -280,7 +300,9 @@ static void *merge_dir_configs(pool *p, void *basev, void *addv)
   dir_config_rec *add = (dir_config_rec *)addv;
 
   new->active = add->active;
+#ifdef WITH_DFS
   new->dfs_authorization = add->dfs_authorization;
+#endif
   new->include_pw = add->include_pw;
   new->impersonate_browser = add->impersonate_browser;
   new->authoritative = add->authoritative;
@@ -293,9 +315,11 @@ static void *merge_dir_configs(pool *p, void *basev, void *addv)
 static command_rec cmds[] = {
   { "AuthDCE", ap_set_flag_slot, (void *) XtOffsetOf(dir_config_rec, active), OR_AUTHCFG, FLAG,
     "Perform DCE authentication in this directory?" },
-  
+
+#ifdef WITH_DFS
   { "AuthDCEDFSAuthorization", ap_set_flag_slot, (void *) XtOffsetOf(dir_config_rec, dfs_authorization), OR_AUTHCFG, FLAG,
     "Use DFS ACLs for authorization in this directory?" },
+#endif
   
   { "AuthDCEIncludePW", ap_set_flag_slot, (void *) XtOffsetOf(dir_config_rec, include_pw), OR_AUTHCFG, FLAG,
     "Include DCE password for CGIs run in this directory?" },
@@ -353,7 +377,7 @@ static int authenticate(request_rec *r)
   sec_passwd_str_t dce_pw;
   boolean32 reset_passwd;
   request_config_rec *request_config;
-
+  
   dir_config_rec *dir_config = (dir_config_rec *)ap_get_module_config(r->per_dir_config, &auth_dce_module);
 
   DEBUG_R("auth_dce.authenticate: called for URI %s", r->uri);
@@ -361,20 +385,74 @@ static int authenticate(request_rec *r)
 
   if (!dir_config->active)
     {
+      if (server_context)
+	ap_table_set(r->subprocess_env, "KRB5CCNAME", getenv("KRB5CCNAME"));
+      
       DEBUG_R("auth_dce.authenticate: active not set, returning DECLINED");
-
+      
       return DECLINED;
     }
 
-  if (!(request_config = (request_config_rec *)ap_get_module_config(r->request_config, &auth_dce_module)))
+#ifdef WITH_DFS
+  if (dir_config->dfs_authorization)
     {
-      DEBUG_R("auth_dce.authenticate: request_config not set, returning OK");
-      if (server_context)
-	ap_table_set(r->subprocess_env, "KRB5CCNAME", getenv("KRB5CCNAME"));
+      struct stat statbuf;
+      int accessible = 1;
 
-      return OK;
+      if(stat(r->filename, &statbuf))
+	accessible = (errno != EACCES);
+      else
+	{
+	  int access_required = R_OK;
+	  
+	  if (S_ISDIR(statbuf.st_mode)	&& (r->uri[strlen(r->uri)-1] == '/'))
+	    {
+	      const char *indexes = (dir_config->index_names) ? (dir_config->index_names) : (DEFAULT_INDEX);
+	      char *slash = (r->filename[strlen(r->filename)-1] == '/') ? "" : "/";
+	      access_required |= X_OK;
+    
+	      while (*indexes)
+		{
+		  char *index = ap_getword_conf(r->pool, &indexes);
+		  char *filename = ap_pstrcat(r->pool, r->filename, slash, index, NULL);
+		  
+		  if (!stat(filename, &statbuf))
+		    {
+		      r->filename = filename;
+		      access_required = R_OK;
+		      break;
+		    }
+		}
+	    }
+
+	  if (access(r->filename, access_required))
+	    accessible = (errno != EACCES);
+	}
+
+      if (accessible)
+	{
+	  DEBUG_R("auth_dce.authenticate: file is accessible, returning OK");
+	  ap_set_module_config(r->request_config, &auth_dce_module, NULL);
+
+	  if (server_context)
+	    ap_table_set(r->subprocess_env, "KRB5CCNAME", getenv("KRB5CCNAME"));
+
+	  return OK;
+	}
+    }
+#endif
+  
+  if (!(ap_table_get (r->headers_in, "Authorization") || ap_table_get (r->headers_in, "Proxy-Authorization")))
+    { 
+      DEBUG_R("auth_dce.authenticate: authorization not provided, returning AUTH_REQUIRED");
+      ap_note_basic_auth_failure(r);
+      
+      return AUTH_REQUIRED;
     }
 
+  ap_set_module_config(r->request_config, &auth_dce_module, (void *)ap_pcalloc(r->pool, sizeof(request_config_rec)));
+  request_config = (request_config_rec *)ap_get_module_config(r->request_config, &auth_dce_module);
+  
   ap_get_basic_auth_pw(r, (const char **)&sent_pw);
 
   DEBUG_R("auth_dce.authenticate: request made by user %s", r->connection->user);
@@ -493,7 +571,7 @@ static int authenticate(request_rec *r)
 	}
 
       request_config->pag = sec_login_inq_pag(login_context, &dce_st);
-      if (dce_st)
+      if (dce_st || !request_config->pag)
 	{
 	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
 	  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
@@ -670,89 +748,6 @@ static int authorize(request_rec *r)
 }
 
 
-static int check_access(request_rec *r)
-{
-  struct stat statbuf;
-
-  int accessible = 1;
-  
-  dir_config_rec *dir_config = (dir_config_rec *)ap_get_module_config(r->per_dir_config, &auth_dce_module);
-
-  DEBUG_R("auth_dce.check_access: called for URI %s", r->uri);
-  DEBUG_R("auth_dce.check_access: called for filename %s", r->filename);
-
-  if (!dir_config->active)
-    {
-      if (server_context)
-	ap_table_set(r->subprocess_env, "KRB5CCNAME", getenv("KRB5CCNAME"));
-      
-      DEBUG_R("auth_dce.check_access: active not set, returning DECLINED");
-      
-      return DECLINED;
-    }
-
-
-  if (!dir_config->dfs_authorization)
-    accessible = 0;
-  else
-    {
-      if(stat(r->filename, &statbuf))
-	accessible = (errno != EACCES);
-      else if (S_ISDIR(statbuf.st_mode))
-	{
-	  if (r->uri[strlen(r->uri)-1] == '/')
-	    {
-	      const char *indexes = (dir_config->index_names) ? (dir_config->index_names) : (DEFAULT_INDEX);
-	      char *slash = (r->filename[strlen(r->filename)-1] == '/') ? "" : "/";
-	      int access_required = R_OK | X_OK;
-	      
-	      while (*indexes)
-		{
-		  char *index = ap_getword_conf(r->pool, &indexes);
-		  char *filename = ap_pstrcat(r->pool, r->filename, slash, index, NULL);
-		  
-		  if (!stat(filename, &statbuf))
-		    {
-		      r->filename = filename;
-		      access_required = R_OK;
-		      break;
-		    }
-		}
-	      
-	      if (access(r->filename, access_required))
-		accessible = (errno != EACCES);
-	    }
-	}
-      else
-	{
-	  if (access(r->filename, R_OK))
-	    accessible = (errno != EACCES);
-	}
-    }
-
-  if (accessible)
-    {
-      DEBUG_R("auth_dce.check_access: file is accessible, returning OK");
-      
-      ap_set_module_config(r->request_config, &auth_dce_module, NULL);
-      return OK;
-    }
-
-  if (ap_table_get (r->headers_in, "Authorization") || ap_table_get (r->headers_in, "Proxy-Authorization"))
-    {
-      DEBUG_R("auth_dce.check_access: file not accessible, authorization given, returning OK");
-      ap_set_module_config(r->request_config, &auth_dce_module, (void *)ap_pcalloc(r->pool, sizeof(request_config_rec)));
-      
-      return OK;
-    }
-  
-  DEBUG_R("auth_dce.check_access: file not accessible, returning AUTH_REQUIRED");
-  ap_note_basic_auth_failure(r);
-  
-  return AUTH_REQUIRED;
-}
-
-
 static int request_cleanup(request_rec *orig)
 {
   sec_login_handle_t login_context;
@@ -787,7 +782,7 @@ static int request_cleanup(request_rec *orig)
 	  else
 	    {
 	      DEBUG_R("auth_dce.request_cleanup: no cache state in request, purging context");
-	      sec_login_context_from_pag(&login_context, &dce_st);
+	      sec_login_context_from_pag(request_config->pag, &login_context, &dce_st);
 	      if (dce_st)
 		{
 		  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
@@ -993,7 +988,7 @@ module auth_dce_module = {
    NULL,			/* filename translation */
    authenticate,	        /* check_user_id */
    authorize,	                /* check auth */
-   check_access,		/* check access */
+   NULL,			/* check access */
    NULL,			/* type_checker */
    NULL,			/* fixups */
    request_cleanup,		/* logger */

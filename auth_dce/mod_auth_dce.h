@@ -12,6 +12,7 @@
 
 /* #define DEBUG */
 
+#ifdef __GNUC__ 
 #ifdef DEBUG
 #define DEBUG_R(X...) ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, r, X)
 #define DEBUG_S(X...) ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, s, X)
@@ -19,12 +20,21 @@
 #define DEBUG_R(X...)
 #define DEBUG_S(X...)
 #endif
+#else
+#define DEBUG_R()
+#define DEBUG_S()
+#endif
 
+/* Comment out on systems without DFS */
+#define WITH_DFS
+
+#ifndef NO_CACHING
 /* How often per server process to log cache statistics, comment out to disable */
 #define CACHE_STATS_INTERVAL 500
 
 /* How many extra random characters to append to a given username for cache stress testing */
 /* #define CACHE_TEST_LEVEL 4 */
+#endif
 
 typedef struct server_config_struct {
     char *user;
@@ -41,7 +51,9 @@ typedef struct server_config_struct {
 
 typedef struct dir_config_struct {
   int active;
+#ifdef WITH_DFS
   int dfs_authorization;
+#endif
   int include_pw;
   int impersonate_browser;
   int authoritative;
@@ -59,11 +71,13 @@ typedef struct request_config_struct {
 #endif
 } request_config_rec;
 
+#ifndef NO_CACHING
 void auth_dce_purge_context(server_rec *s, unsigned long pag);
 void auth_dce_initialize_cache(server_rec *s, pool *p);
 void auth_dce_find_cached_context(request_rec *r, request_config_rec *request_config, char *username, char *password);
 void auth_dce_add_cached_context(request_rec *r, request_config_rec *request_config);
 void auth_dce_release_cached_context(request_rec *r, request_config_rec *request_config);
+#endif
 
 #endif
 
