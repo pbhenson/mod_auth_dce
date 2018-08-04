@@ -154,8 +154,12 @@ static pthread_addr_t refresh_context(pthread_addr_t arg)
       sleep_interval.tv_sec = expiration_time - now - 10 * 60;
       sleep_interval.tv_nsec = 0;
       
+      DEBUG_S("auth_dce.refresh_context: sleeping %d seconds", sleep_interval.tv_sec);
+
       pthread_delay_np(&sleep_interval);
 	
+      DEBUG_S("auth_dce.refresh_context: calling sec_login_refresh_identity");
+
       sec_login_refresh_identity(server_context, &dce_st);
       if (dce_st)
 	{
@@ -164,6 +168,8 @@ static pthread_addr_t refresh_context(pthread_addr_t arg)
 		       "auth_dce.refresh_context: sec_login_refresh_identity failed - %s (%d)", dce_error, dce_st);
 	}
       
+      DEBUG_S("auth_dce.refresh_context: calling sec_login_valid_from_keytable");
+
       sec_login_valid_from_keytable(server_context, rpc_c_authn_dce_secret, auth_dce_server_config.keytab, (unsigned32) NULL, &kvno_worked,
 				    &reset_passwd, &auth_src, &dce_st);
       if (dce_st)
@@ -172,6 +178,8 @@ static pthread_addr_t refresh_context(pthread_addr_t arg)
 	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, s,
 		       "auth_dce.refresh_context: sec_login_valid_from_keytable failed - %s (%d)", dce_error, dce_st);
 	}
+
+      DEBUG_S("auth_dce.refresh_context: context refreshed");
     }		   
   return 0;
 }
@@ -843,9 +851,23 @@ static int request_cleanup(request_rec *orig)
   return OK;
 }
 
-extern uid_t ap_user_id;
-
 static void initialize(server_rec *s, pool *p)
+{
+
+#ifndef NO_CACHING
+  DEBUG_S("auth_dce.initialize: cache_buckets = %d", auth_dce_server_config.cache_buckets);
+  DEBUG_S("auth_dce.initialize: cache_graceperiod = %d", auth_dce_server_config.cache_graceperiod);
+  DEBUG_S("auth_dce.initialize: cache_lifetime = %d", auth_dce_server_config.cache_lifetime);
+  DEBUG_S("auth_dce.initialize: cache_max_idle = %d", auth_dce_server_config.cache_max_idle);
+  DEBUG_S("auth_dce.initialize: cache_sweep_interval = %d", auth_dce_server_config.cache_sweep_interval);
+  DEBUG_S("auth_dce.initialize: calling cache initialization");
+  
+  auth_dce_initialize_cache(s, p);
+#endif
+}
+
+
+static void process_initialize(server_rec *s, pool *p)
 {
   error_status_t dce_st;
   dce_error_string_t dce_error;
@@ -855,26 +877,19 @@ static void initialize(server_rec *s, pool *p)
   unsigned32 kvno_worked;
   pthread_t refresh_thread;
 
-  DEBUG_S("auth_dce.initialize: user = %s", (auth_dce_server_config.user ? auth_dce_server_config.user : "NULL")); 
-  DEBUG_S("auth_dce.initialize: keytab = %s", (auth_dce_server_config.keytab ? auth_dce_server_config.keytab : "NULL")); 
-  DEBUG_S("auth_dce.initialize: certify_identity = %d", auth_dce_server_config.certify_identity);
-#ifndef NO_CACHING
-  DEBUG_S("auth_dce.initialize: cache_buckets = %d", auth_dce_server_config.cache_buckets);
-  DEBUG_S("auth_dce.initialize: cache_graceperiod = %d", auth_dce_server_config.cache_graceperiod);
-  DEBUG_S("auth_dce.initialize: cache_lifetime = %d", auth_dce_server_config.cache_lifetime);
-  DEBUG_S("auth_dce.initialize: cache_max_idle = %d", auth_dce_server_config.cache_max_idle);
-  DEBUG_S("auth_dce.initialize: cache_sweep_interval = %d", auth_dce_server_config.cache_sweep_interval);
-#endif
+  DEBUG_S("auth_dce.process_initialize: user = %s", (auth_dce_server_config.user ? auth_dce_server_config.user : "NULL")); 
+  DEBUG_S("auth_dce.process_initialize: keytab = %s", (auth_dce_server_config.keytab ? auth_dce_server_config.keytab : "NULL")); 
+  DEBUG_S("auth_dce.process_initialize: certify_identity = %d", auth_dce_server_config.certify_identity);
 
+#ifndef NO_CACHING
+  putenv(krb5_env);
+  krb5_env[0] = 'X';
+#endif
+  
   if (auth_dce_server_config.user)
     {
       DEBUG_S("auth_dce.initialize: calling sec_login_setup_identity");
 
-      /* Ensure local credential files have correct ownership */
-      DEBUG_S("auth_dce.initialize: calling seteuid(%d)", ap_user_id);
-      if (seteuid(ap_user_id) == -1)
-	ap_log_error(APLOG_MARK, APLOG_ERR, s, "auth_dce.initialize: seteuid(%d) failed, credential files may be unreadable", ap_user_id);
-      
       if (!sec_login_setup_identity((unsigned_char_p_t)auth_dce_server_config.user,
 				    sec_login_no_flags, &server_context, &dce_st))
 	{
@@ -883,9 +898,6 @@ static void initialize(server_rec *s, pool *p)
 		       "auth_dce.initialize: sec_login_setup_identity failed for %s - %s (%d)", auth_dce_server_config.user, dce_error, dce_st);
 	  exit(1);
 	}
-
-      if (seteuid(0) == -1)
-	ap_log_error(APLOG_MARK, APLOG_ERR, s, "auth_dce.initialize: seteuid(0) failed, things will probably be goofy now");
 
       DEBUG_S("auth_dce.initialize: calling sec_login_valid_from_keytable");
       
@@ -922,39 +934,7 @@ static void initialize(server_rec *s, pool *p)
 	  exit(1);
 	}
 
-      DEBUG_S("auth_dce.initialize: spawning server credential refresh thread");
-      
-      if (pthread_create(&refresh_thread, pthread_attr_default, refresh_context, (pthread_addr_t) s))
-	{
-	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s,
-		       "auth_dce.initialize: pthread_create failed");
-	  exit(1);
-	}
-	
-      pthread_detach(&refresh_thread);
-    }
 
-#ifndef NO_CACHING
-  DEBUG_S("auth_dce.initialize: calling cache initialization");
-  
-  auth_dce_initialize_cache(s, p);
-#endif
-}
-
-
-static void process_initialize(server_rec *s, pool *p)
-{
-  error_status_t dce_st;
-  dce_error_string_t dce_error;
-  int dce_error_st;
-
-#ifndef NO_CACHING
-  putenv(krb5_env);
-  krb5_env[0] = 'X';
-#endif
-  
-  if (server_context)
-    {
       DEBUG_S("auth_dce.process_initialize: calling sec_login_set_context");
 
       sec_login_set_context(server_context, &dce_st);
@@ -966,6 +946,18 @@ static void process_initialize(server_rec *s, pool *p)
 	  
 	  exit(1);
 	}
+
+      DEBUG_S("auth_dce.initialize: spawning server credential refresh thread");
+      
+      if (pthread_create(&refresh_thread, pthread_attr_default, refresh_context, (pthread_addr_t) s))
+	{
+	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s,
+		       "auth_dce.initialize: pthread_create failed");
+	  exit(1);
+	}
+	
+      pthread_detach(&refresh_thread);
+
 #ifndef NO_CACHING
       server_pag = sec_login_inq_pag(server_context, &dce_st);
       if (dce_st)
@@ -976,8 +968,6 @@ static void process_initialize(server_rec *s, pool *p)
 	  
 	  exit(1);
 	}
-
-      sec_login_release_context(&server_context, &dce_st);
 
       krb5_env[0] = 'K';
       sprintf(krb5_env_pag, "%08x", server_pag);
