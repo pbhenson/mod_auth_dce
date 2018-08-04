@@ -1,9 +1,9 @@
 /*
  * DCE Authentication Module for Apache HTTP Server
  *
- * Paul Henson <henson@acm.org>
+ * Paul B. Henson <henson@acm.org>
  *
- * Copyright (c) 1996-2000 Paul Henson -- see COPYRIGHT file for details
+ * Copyright (c) 1996-2001 Paul B. Henson -- see COPYRIGHT file for details
  *
  */
 
@@ -33,7 +33,7 @@
             2[012345]*)
                 LIBS="$LIBS -ldce -lthread -lsocket -lnsl -lm"
                 ;;
-            26*)
+            2[678]*)
                 LIBS="$LIBS -ldce -lpthread -lsocket -lnsl"
                 ;;
 	    *)
@@ -173,6 +173,7 @@ static pthread_addr_t refresh_context(pthread_addr_t arg)
 		       "auth_dce.refresh_context: sec_login_valid_from_keytable failed - %s (%d)", dce_error, dce_st);
 	}
     }		   
+  return 0;
 }
 
 #ifndef NO_CACHING
@@ -405,25 +406,28 @@ static int authenticate(request_rec *r)
 	{
 	  int access_required = R_OK;
 	  
-	  if (S_ISDIR(statbuf.st_mode)	&& (r->uri[strlen(r->uri)-1] == '/'))
-	    {
-	      const char *indexes = (dir_config->index_names) ? (dir_config->index_names) : (DEFAULT_INDEX);
-	      char *slash = (r->filename[strlen(r->filename)-1] == '/') ? "" : "/";
-	      access_required |= X_OK;
-    
-	      while (*indexes)
-		{
-		  char *index = ap_getword_conf(r->pool, &indexes);
-		  char *filename = ap_pstrcat(r->pool, r->filename, slash, index, NULL);
-		  
-		  if (!stat(filename, &statbuf))
-		    {
-		      r->filename = filename;
-		      access_required = R_OK;
-		      break;
-		    }
-		}
-	    }
+	  if (S_ISDIR(statbuf.st_mode))
+	    if (r->uri[strlen(r->uri)-1] == '/')
+	      {
+		const char *indexes = (dir_config->index_names) ? (dir_config->index_names) : (DEFAULT_INDEX);
+		char *slash = (r->filename[strlen(r->filename)-1] == '/') ? "" : "/";
+		access_required |= X_OK;
+		
+		while (*indexes)
+		  {
+		    char *index = ap_getword_conf(r->pool, &indexes);
+		    char *filename = ap_pstrcat(r->pool, r->filename, slash, index, NULL);
+		    
+		    if (!stat(filename, &statbuf))
+		      {
+			r->filename = filename;
+			access_required = R_OK;
+			break;
+		      }
+		  }
+	      }
+	    else
+	      return OK; /* request for directory with no trailing slash, allow redirect without authentication */
 
 	  if (access(r->filename, access_required))
 	    accessible = (errno != EACCES);
@@ -442,7 +446,7 @@ static int authenticate(request_rec *r)
     }
 #endif
   
-  if (!(ap_table_get (r->headers_in, "Authorization") || ap_table_get (r->headers_in, "Proxy-Authorization")))
+  if (!(ap_table_get(r->headers_in, r->proxyreq != STD_PROXY ? "Authorization" : "Proxy-Authorization")))
     { 
       DEBUG_R("auth_dce.authenticate: authorization not provided, returning AUTH_REQUIRED");
       ap_note_basic_auth_failure(r);
@@ -653,6 +657,17 @@ static int authenticate(request_rec *r)
 
   if (dir_config->include_pw)
     ap_table_set(r->subprocess_env, "DCEPW", sent_pw);  
+
+/* requested feature to remove authorization header for requests where
+   include_pw not set, currently disabled pending debugging of strange
+   side effects
+
+  else
+    ap_table_set(r->headers_in, r->proxyreq != STD_PROXY ? "Authorization" : "Proxy-Authorization",
+		 ap_pstrcat(r->pool, "Basic ",
+                            ap_pbase64encode(r->pool, ap_pstrcat(r->pool, r->connection->user, ":<censored>", NULL)),
+                            NULL));
+*/
   
   DEBUG_R("auth_dce.authenticate: returning OK");
 

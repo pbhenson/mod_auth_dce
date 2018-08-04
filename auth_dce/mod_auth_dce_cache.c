@@ -1,9 +1,9 @@
 /*
  * DCE Authentication Module for Apache HTTP Server
  *
- * Paul Henson <henson@acm.org>
+ * Paul B. Henson <henson@acm.org>
  *
- * Copyright (c) 1996-2000 Paul Henson -- see COPYRIGHT file for details
+ * Copyright (c) 1996-2001 Paul B. Henson -- see COPYRIGHT file for details
  *
  */
 
@@ -478,5 +478,5 @@ void auth_dce_release_cached_context(request_rec *r, request_config_rec *request
 }
 
 #else
-int auth_dce_dummy() {}
+void auth_dce_dummy() {}
 #endif 
