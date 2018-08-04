@@ -3,6 +3,10 @@
 #include <dce/sec_login.h>
 #include <dce/dce_error.h>
 
+#ifdef AIX
+#define afs_syscall kafs_syscall
+#endif
+
 #define AFSCALL_RESETPAG 20     /* reset PAG syscall */
 
 int access_file();

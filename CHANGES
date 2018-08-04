@@ -1,3 +1,30 @@
+1.3 - Added DCEIncludePW configuration directive, which enables passing
+      browser passwords to CGIs. Previous versions of mod_auth_dce
+      always passed the browser password to a CGI, which on a machine that
+      allowed interactive logins could potentially expose browser passwords
+      to users via the ps command. Thanks to Mark Plaksin
+      <happy@arches.uga.edu> for pointing out this problem.
+
+    - Revised advice about symlink checking. Previously, it was recommended
+      that symlinks be allowed in general. However, if your web server
+      publishes user files, a user can use a symlink to potentially read
+      other users DCE credential files. Therefore, the current
+      recommendation is to either disable symlinks, or only allow symlinks
+      if the owner matches.
+
+    - Removed patches for Apache 1.1.3, 1.2.0, and Stronghold 1.3.4.
+      Added patches for Apache 1.2.4 and Apache 1.2.4+ssl_1.9. Versions
+      of Apache older than 1.2.4 are no longer supported. No version of
+      Stronghold is currently supported, mainly due to their decision to
+      incorporate IP address based licensing restrictions and not
+      distribute full source code without a non-disclosure agreement.
+
+    - Added support for credential caching under AIX. Thanks to Klaus
+      Gottschalk <ox01@saturn.rz.uni-karlsruhe.de> for the implementation
+      details of afs_syscall under AIX, and to Mark Plaksin for providing
+      access to an AIX environment to test them.
+
+
 1.2 - Added support for Apache 1.2.0 and included a patch file for that
       version.
 
@@ -22,3 +49,8 @@
 
 
 0.9 - First publicly released version
+
+    - Thanks to Steve Moyer <moyer@transarc.com>, for invaluable technical
+      support and advice on DFS issues, Doug MacEachern <dougm@osf.org> for
+      help with context caching implementation, and Craig Rich
+      <carich@csupomona.edu> for inspiration.

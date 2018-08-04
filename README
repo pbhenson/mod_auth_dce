@@ -34,9 +34,9 @@ authenticated CGI execution.
 
 mod_auth_dce currently uses standard Basic authentication to get the
 username and password. With stock Apache, this means the password is
-transmitted in cleartext. However, with Stronghold, the password will
-be encrypted if SSL is used. A future release might support Kerberos
-authentication to avoid the cleartext password problem.
+transmitted in cleartext. However, if Apache-SSL is used, the password can
+be encrypted. A future release might support Kerberos authentication to
+avoid the cleartext password problem.
 
 
 Installation
@@ -70,20 +70,19 @@ of the cache options, such as the size, expiration time, or size of the
 login context buffer. Please see the mod_auth_dce.c file for details of
 these options. The defaults should be acceptable for most installations.
 
-For Apache 1.2.0 or newer, you do not need to edit the Configure script
-if you're using Solaris 2.5/Transarc DCE 1.1 or Digital Unix 4.0/Digital
-DCE 2.0, as the correct libraries are already specified. If you're using
-a different OS or DCE version, you need to edit the Configure script and
-specify the correct libraries for your configuration.
+If you're using Solaris 2.5, Digital Unix 4.0, or IBM AIX 4.x, you do not
+need to edit the Configure script, as the correct libraries are already
+specified. If you're using a different OS or version, you need to edit the
+Configure script and specify the correct libraries for your configuration.
 
-If you're using an older version of Apache, edit the Configuration file.
-Uncomment the correct library definitions for your implementation, or add
-your own if no defaults are available for your platform.
-
-Run the Configure script to generate a Makefile. Copy mod_auth_dce.c to
-your server build directory, and type make to compile the server. Copy the
-resulting server binary to the appropriate location, and you have completed
-the installation process.
+Edit the Configuration file, if desired, to change the modules that will be
+built into Apache. If you're using Apache-SSL, you'll also need to edit the
+Configuration file to point to your SSL build directory. Copy
+mod_auth_dce.c to your server build directory. If you're using AIX, also
+copy the file afs_syscall.aix to your build directory. Run the Configure
+script to generate a Makefile, and type make to compile the server. Copy
+the resulting server binary to the appropriate location, and you have
+completed the installation process.
 
 
 Configuration Directives and Notes
@@ -121,6 +120,15 @@ AuthDFS - This directive should appear in a Directory block and takes
           "valid-user".
 
 
+DCEIncludePW - This directive should appear in a Directory block and takes
+               either "On" or "Off" as an argument. It defaults to "Off".
+               Setting it to "On" will enable passing the browser's
+               password to CGI programs via the environment variable
+               DCEPW. Only enable this directive on web servers that do not
+               allow interactive logins. Otherwise, users could use the ps
+               command to potentially acquire plaintext passwords.
+
+
 DCEDirectoryIndex - This directive should appear right next to your current
                     DirectoryIndex directive, with the same list of valid
                     index files. If not specified, DCEDirectoryIndex will
@@ -135,11 +143,16 @@ DCEDirectoryIndex - This directive should appear right next to your current
                     reduntant directive.
 
 
-Checking for symlinks and .htaccess files will not work reliably with
-this module, because the checks are made before credentials are obtained,
-and the server might not be able to read the directories at that time.
-It is recommended that symlinks be enabled and .htaccess files be disabled
-in any directory hierarchy in which DCE authentication is enabled.
+Checking for .htaccess files will only work if the .htaccess file is world
+readable, and all directories in its path are world searchable. It is
+recommended that .htaccess files be disabled, as they have not been tested
+thoroughly.
+
+Previous versions of the documentation recommended not checking for
+symlinks. However, if your web server publishes user files, a user can
+potentially use symlinks to read other users DCE credential files.
+Therefore, the current recommendation is either to disable symlinks,
+or to only allow symlinks if the owner matches.
 
 
 Sample Configuration
@@ -189,28 +202,22 @@ this feature, please see
 
 
 The identity of the browser is available to the CGI via the standard
-REMOTE_USER environment variable.
+REMOTE_USER environment variable. If DCEIncludePW is set, then the
+browser's DCE password is also available to the CGI via the DCEPW
+environment variable. Do not set DCEIncludePW on a web server that also
+allows user logins, or the ps command could potentially be used to
+compromise passwords.
 
-The browser's DCE password is also available to the CGI via the DCEPW
-environment variable, for DCE administration commands that require it.
 You shouldn't allow untrusted users to place CGIs in a DCE authenticated
 location, as they could then have their CGI run with a browser's
-credentials and steal the browser's password.
+credentials.
 
 
 Feedback/Availability
 ---------------------
 
-Please report any bugs or feature requests to <henson@acm.org>. In
-addition, I'd be interested to hear about how well mod_auth_dce works
-with different DCE implementations, and which implementations exhibit
-the bugs checked for by the test program. The appropriate libraries to
-link with for implementations that currently have no entries in the Apache
-Configuration file or the test program Makefile are also appreciated.
+Please report any bugs or feature requests to <henson@acm.org>.
 
-I'd also be very interested to hear that you're using mod_auth_dce. I'd
-appreciate it if you could send me email even if you have no problems
-or requests, so I can see how widely used the module is.
 
 The latest version of mod_auth_dce is currently available at
 

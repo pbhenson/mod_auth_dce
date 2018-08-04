@@ -3,40 +3,28 @@ Installing Patches
 ------------------
 
 This module currently requires a few minor patches to the Apache source
-code for correct operation. In the patches subdirectory, you'll find three
+code for correct operation. In the patches subdirectory, you'll find two
 patch files:
 
 
-     apache-1.2.0.diff     -- For Apache 1.2.0
-     apache-1.1.3.diff     -- For Apache 1.1.3
-     stronghold-1.3.4.diff -- For Stronghold 1.3.4
+     apache-1.2.4.diff             -- For Apache 1.2.4
+     apache-1.2.4+ssl_1.9.diff     -- For Apache 1.2.4+ssl1.9
 
 
-To apply the patch to Apache 1.2.0, run the command:
+To apply the patch to Apache 1.2.4, run the command:
 
 
-     patch -p1 -d /path/to/apache_1.2.0 < \
-          /path/to/mod_auth_dce-1.2/patches/apache-1.2.0.diff
+     patch -p1 -d /path/to/apache_1.2.4 < \
+          /path/to/mod_auth_dce-1.3/patches/apache-1.2.4.diff
 
 
-To apply the patch to Apache 1.1.3, run the command:
-
-
-     patch -p1 -d /path/to/apache_1.1.3 < \
-          /path/to/mod_auth_dce-1.2/patches/apache-1.1.3.diff
-
-
-To apply the patch to Stronghold 1.3.4, first install Stronghold, which
-will create the src directory under your server_root. Then, run the 
+To apply the patch to Apache 1.2.4+ssl1.9, first be sure you have already
+applied the SSL patch to the Apache 1.2.4 distribution. Then, run the
 command:
 
 
-     patch -p1 -d /path/to/stronghold_server_root < \
-          /path/to/mod_auth_dce-1.2/patches/stronghold-1.3.4.diff
-
-
-Stronghold requires some minor changes by hand to work correctly with
-mod_auth_dce. Please see the end of this file for details.
+     patch -p1 -d /path/to/apache_1.2.4+ssl1.9 < \
+          /path/to/mod_auth_dce-1.3/patches/apache-1.2.4+ssl_1.9.diff
 
 
 
@@ -82,9 +70,13 @@ the modifications needed to be made.
 
   Configuration
 
-       An AUX_LIBS line is added for each configuration for which the
-       correct DCE libraries are known, and a Module line is added for
-       mod_auth_dce.
+       A Module line is added for mod_auth_dce.
+
+
+  Configure
+
+       The C compiler, C flags, libraries, and ld flags are modified for
+       DCE support for Solaris, Digital Unix, and AIX.
 
 
   md5.h, md5c.c, mod_proxy.c, util_md5.h, util_md5.c 
@@ -93,24 +85,3 @@ the modifications needed to be made.
        with identically named functions in the DCE library. All the
        Apache routines are modified to include an apache_ prefix to
        remove this collision.
-
-
-Further Modifications for Stronghold
-------------------------------------
-
-By default, Stronghold is shipped to compile with RSAREF. Unfortunately,
-rsaref.a also includes MD5 routines that collide with the DCE library.
-To fix this, either the RSAREF code must be modified and recompiled to
-remove the collision, or Stronghold must be compiled without RSAREF.
-
-RSA Data Security, Inc. claims it is a patent violation to use the SSLeay
-RSA routines inside the US. My patch does not reconfigure Stronghold to
-use SSLeay. If you are in the US, I neither recommend nor endorse
-violating RSA's patent. If you choose to use Stronghold with SSLeay RSA
-routines in the US, you accept full responsibility for any legal
-ramifications, and by using mod_auth_dce with such a configuration you
-explicitly agree that I am in no way responsible for your actions.
-
-To compile Stronghold without RSAREF, edit the Configuration file. Remove
-libRSAglue.a from the SSL_LIBS line, and comment out the SSL_RSA_LIBS
-line.

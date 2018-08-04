@@ -2,6 +2,7 @@
  * DCE Authentication Module for Apache HTTP Server
  *
  * Paul Henson <henson@acm.org>
+ * California State Polytechnic University, Pomona
  *
  * Copyright (c) 1996,1997 Paul Henson -- see COPYRIGHT file for details
  *
@@ -24,6 +25,13 @@
 #include "http_log.h"
 #include "http_protocol.h"
 #include "md5.h"
+
+/* In AIX land, afs_syscall is called kafs_syscall.
+ * Variety is the spice of life, after all....
+ */
+#ifdef AIX
+#define afs_syscall kafs_syscall
+#endif
 
 
 /* Comment out to disable login context caching */
@@ -75,15 +83,17 @@ static void add_cached_context(request_rec *r, sec_login_handle_t *, char *, cha
 
 
 /* Define module structure for per-directory configuration. The
- * structure has three members. do_auth_dce determines whether DCE
+ * structure has four members. do_auth_dce determines whether DCE
  * authentication is turned on in a given directory, do_auth_dfs
  * controls whether the module uses DFS ACLs for authorization,
- * and index_names lists the possible valid index files for a
- * directory.
+ * index_names lists the possible valid index files for a
+ * directory, and do_include_pw controls whether a CGI is passed
+ * the DCE password of the browser when invoked.
  */
 typedef struct auth_dce_config_struct {
   int do_auth_dce;
   int do_auth_dfs;
+  int do_include_pw;
   char *index_names;
 } auth_dce_config_rec;
 
@@ -110,6 +120,7 @@ const char *set_auth_dce(cmd_parms *cmd, void *dv, int arg)
   return NULL;
 }
 
+
 /* Function that is called to configure a directory when an
  * AuthDFS configuration directive is found. It is passed
  * a flag indicating whether DFS ACLs should be used for
@@ -125,6 +136,21 @@ const char *set_auth_dfs(cmd_parms *cmd, void *dv, int arg)
 }
 
 
+/* Function that is called to configure a directory when a
+ * DCEIncludePW configuration directive is found. It is passed
+ * a flag indicating whether CGIs run in this directory should be
+ * given the browser's DCE password.
+ */
+const char *set_include_pw(cmd_parms *cmd, void *dv, int arg)
+{
+  auth_dce_config_rec *d = (auth_dce_config_rec *)dv;
+  
+  d->do_include_pw = arg;
+  
+  return NULL;
+}
+
+
 /* Function that is called to merge two directory configurations. */
 void *merge_dce_dir_configs(pool *p, void *basev, void *addv)
 {
@@ -134,6 +160,7 @@ void *merge_dce_dir_configs(pool *p, void *basev, void *addv)
 
   new->do_auth_dce = add->do_auth_dce;
   new->do_auth_dfs = add->do_auth_dfs;
+  new->do_include_pw = add->do_include_pw;
   new->index_names = (add->index_names) ? (add->index_names) : (base->index_names);
   
   return new;
@@ -141,7 +168,7 @@ void *merge_dce_dir_configs(pool *p, void *basev, void *addv)
 
 
 /* This structure defines the configuration commands this module
- * is willing to handle. As of Apache 1.2, both flag directives
+ * is willing to handle. As of Apache 1.2, all flag directives
  * could be set via the built-in set_flag_slot, but that would
  * break backwards compatibility with 1.1.3.
  */
@@ -150,6 +177,8 @@ command_rec auth_dce_cmds[] = {
     "Perform DCE authentication in this directory?" },
   { "AuthDFS", set_auth_dfs, NULL, OR_AUTHCFG, FLAG,
     "Use DFS ACLs for authorization in this directory?" },
+  { "DCEIncludePW", set_include_pw, NULL, OR_AUTHCFG, FLAG,
+    "Include DCE password for CGIs run in this directory?" },
   { "DCEDirectoryIndex", set_string_slot,
     (void*)XtOffsetOf(auth_dce_config_rec, index_names),
     OR_INDEXES, RAW_ARGS, NULL },
@@ -414,7 +443,12 @@ int authenticate_dce_user (request_rec *r)
    * be at least as much overhead as just setting them.
    */
   table_set(r->subprocess_env, "KRB5CCNAME", getenv("KRB5CCNAME"));
-  table_set(r->subprocess_env, "DCEPW", sent_pw);  
+
+  /* Only set the password environment variable if explicitly configured
+   * to do so.
+   */
+  if (a->do_include_pw)
+    table_set(r->subprocess_env, "DCEPW", sent_pw);  
   
   log_debug(DEBUG_INFO, "authenticate_dce_user: returning OK",
             r->server);

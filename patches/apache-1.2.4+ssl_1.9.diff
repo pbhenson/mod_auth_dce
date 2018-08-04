@@ -1,0 +1,547 @@
+diff -c -r apache_1.2.4+ssl_1.9-orig/src/Configuration apache_1.2.4+ssl_1.9/src/Configuration
+*** apache_1.2.4+ssl_1.9-orig/src/Configuration	Tue Nov 18 15:53:18 1997
+--- apache_1.2.4+ssl_1.9/src/Configuration	Wed Oct 15 18:18:15 1997
+***************
+*** 137,143 ****
+  ## passed to CGI/SSI scripts.  It is listed first (lowest priority) since
+  ## it does not do per-request stuff.
+  
+! Module env_module          mod_env.o
+  
+  ## mod_dld defines commands that allow other modules to be loaded
+  ## dynamically (at runtime).  This module is for experimental use only.
+--- 137,143 ----
+  ## passed to CGI/SSI scripts.  It is listed first (lowest priority) since
+  ## it does not do per-request stuff.
+  
+! #Module env_module          mod_env.o
+  
+  ## mod_dld defines commands that allow other modules to be loaded
+  ## dynamically (at runtime).  This module is for experimental use only.
+***************
+*** 174,185 ****
+  ## STATUS=yes (see the Rules section near the start of this file) to allow
+  ## full status information.  Check conf/access.conf on how to enable this.
+  
+! # Module status_module       mod_status.o
+  
+  ## The Info module displays configuration information for the server and 
+  ## all included modules. It's very useful for debugging.
+  
+! # Module info_module         mod_info.o
+  
+  ## mod_include translates server-side include (SSI) statements in text files.
+  ## mod_dir handles requests on directories and directory indexes.
+--- 174,185 ----
+  ## STATUS=yes (see the Rules section near the start of this file) to allow
+  ## full status information.  Check conf/access.conf on how to enable this.
+  
+! Module status_module       mod_status.o
+  
+  ## The Info module displays configuration information for the server and 
+  ## all included modules. It's very useful for debugging.
+  
+! Module info_module         mod_info.o
+  
+  ## mod_include translates server-side include (SSI) statements in text files.
+  ## mod_dir handles requests on directories and directory indexes.
+***************
+*** 195,201 ****
+  ## CGI scripts which act as "handlers" for particular files, for example to
+  ## automatically convert every GIF to another file type.
+  
+! Module asis_module         mod_asis.o
+  Module imap_module         mod_imap.o
+  Module action_module       mod_actions.o
+  
+--- 195,201 ----
+  ## CGI scripts which act as "handlers" for particular files, for example to
+  ## automatically convert every GIF to another file type.
+  
+! #Module asis_module         mod_asis.o
+  Module imap_module         mod_imap.o
+  Module action_module       mod_actions.o
+  
+***************
+*** 212,218 ****
+  ## NOTE: You do not want this module UNLESS you are running a proxy;
+  ##       it is not needed for normal (origin server) operation.
+  
+! Module proxy_module        modules/proxy/libproxy.a
+  
+  ## The Alias module provides simple URL translation and redirection.
+  
+--- 212,218 ----
+  ## NOTE: You do not want this module UNLESS you are running a proxy;
+  ##       it is not needed for normal (origin server) operation.
+  
+! #Module proxy_module        modules/proxy/libproxy.a
+  
+  ## The Alias module provides simple URL translation and redirection.
+  
+***************
+*** 227,238 ****
+  ## Access control and authentication modules. 
+  ##
+  Module access_module       mod_access.o
+! Module auth_module         mod_auth.o
+  
+  ## The anon_auth module allows for anonymous-FTP-style username/ 
+  ## password authentication.
+  
+! Module anon_auth_module    mod_auth_anon.o
+  
+  ## db_auth and dbm_auth work with Berkeley DB files - make sure there
+  ## is support for DBM files on your system.  You may need to grab the GNU
+--- 227,241 ----
+  ## Access control and authentication modules. 
+  ##
+  Module access_module       mod_access.o
+! #Module auth_module         mod_auth.o
+! 
+! ## DCE authentication module
+! Module auth_dce_module     mod_auth_dce.o
+  
+  ## The anon_auth module allows for anonymous-FTP-style username/ 
+  ## password authentication.
+  
+! #Module anon_auth_module    mod_auth_anon.o
+  
+  ## db_auth and dbm_auth work with Berkeley DB files - make sure there
+  ## is support for DBM files on your system.  You may need to grab the GNU
+***************
+*** 240,246 ****
+  ## done by Configure at a later date)
+  
+  # Module db_auth_module      mod_auth_db.o
+! Module dbm_auth_module     mod_auth_dbm.o
+  
+  ## msql_auth checks against an mSQL database.  You must have mSQL installed
+  ## and an "msql.h" available for this to even compile.  Additionally,
+--- 243,249 ----
+  ## done by Configure at a later date)
+  
+  # Module db_auth_module      mod_auth_db.o
+! #Module dbm_auth_module     mod_auth_dbm.o
+  
+  ## msql_auth checks against an mSQL database.  You must have mSQL installed
+  ## and an "msql.h" available for this to even compile.  Additionally,
+***************
+*** 256,279 ****
+  ## "digest" implements HTTP Digest Authentication rather than the less 
+  ## secure Basic Auth used by the other modules.
+  
+! Module digest_module       mod_digest.o
+  
+  ## Optional response header manipulation modules. 
+  ##
+  ## cern_meta mimics the behavior of the CERN web server with regards to 
+  ## metainformation files.  
+  
+! Module cern_meta_module    mod_cern_meta.o
+  
+  ## The expires module can apply Expires: headers to resources,
+  ## as a function of access time or modification time.
+  
+! Module expires_module      mod_expires.o
+  
+  ## The headers module can set arbitrary HTTP response headers,
+  ## as configured in server, vhost, access.conf or .htaccess configs
+  
+! Module headers_module      mod_headers.o
+  
+  # Damn damn damn. Apache inverts the module list. SSL must go first to fake
+  # basic authorization. So, uncomment this line to add SSL.
+--- 259,282 ----
+  ## "digest" implements HTTP Digest Authentication rather than the less 
+  ## secure Basic Auth used by the other modules.
+  
+! #Module digest_module       mod_digest.o
+  
+  ## Optional response header manipulation modules. 
+  ##
+  ## cern_meta mimics the behavior of the CERN web server with regards to 
+  ## metainformation files.  
+  
+! #Module cern_meta_module    mod_cern_meta.o
+  
+  ## The expires module can apply Expires: headers to resources,
+  ## as a function of access time or modification time.
+  
+! #Module expires_module      mod_expires.o
+  
+  ## The headers module can set arbitrary HTTP response headers,
+  ## as configured in server, vhost, access.conf or .htaccess configs
+  
+! #Module headers_module      mod_headers.o
+  
+  # Damn damn damn. Apache inverts the module list. SSL must go first to fake
+  # basic authorization. So, uncomment this line to add SSL.
+***************
+*** 289,295 ****
+  ## You do not need this, or any other module to allow your site
+  ## to use Cookies.  This module is for user tracking only
+  
+! Module usertrack_module      mod_usertrack.o
+  
+  ## The example module, which demonstrates the use of the API.  See
+  ## the file modules/example/README for details.  This module should
+--- 292,298 ----
+  ## You do not need this, or any other module to allow your site
+  ## to use Cookies.  This module is for user tracking only
+  
+! #Module usertrack_module      mod_usertrack.o
+  
+  ## The example module, which demonstrates the use of the API.  See
+  ## the file modules/example/README for details.  This module should
+diff -c -r apache_1.2.4+ssl_1.9-orig/src/Configure apache_1.2.4+ssl_1.9/src/Configure
+*** apache_1.2.4+ssl_1.9-orig/src/Configure	Thu Aug 21 15:56:20 1997
+--- apache_1.2.4+ssl_1.9/src/Configure	Tue Nov 18 16:31:15 1997
+***************
+*** 207,218 ****
+  	;;
+      *-ibm-aix[1-3].*|*-ibm-aix4.[0-1])
+          OS='IBM AIX < v4.2'
+          CFLAGS="$CFLAGS -DAIX -DNEED_RLIM_T -U__STR__"
+          ;;
+      *-ibm-aix*)
+          OS='IBM AIX >= 4.2'
+          CFLAGS="$CFLAGS -DAIX -U__STR__"
+! 	LFLAGS="$LFLAGS -lm"
+          ;;
+      *-apollo-*)
+  	OS='Apollo Domain'
+--- 207,221 ----
+  	;;
+      *-ibm-aix[1-3].*|*-ibm-aix4.[0-1])
+          OS='IBM AIX < v4.2'
++         CC=xlC_r4
+          CFLAGS="$CFLAGS -DAIX -DNEED_RLIM_T -U__STR__"
++ 	LFLAGS="$LFLAGS -bI:afs_syscall.aix -lm -ldce"
+          ;;
+      *-ibm-aix*)
+          OS='IBM AIX >= 4.2'
++         CC=xlC_r4
+          CFLAGS="$CFLAGS -DAIX -U__STR__"
+! 	LFLAGS="$LFLAGS -bI:afs_syscall.aix -lm -ldce"
+          ;;
+      *-apollo-*)
+  	OS='Apollo Domain'
+***************
+*** 344,350 ****
+      *-dec-osf*)
+  	OS='DEC OSF/1'
+  	CFLAGS="$CFLAGS -DOSF1"
+! 	LIBS="$LIBS -lm"
+  	;;
+      *-qnx)
+  	OS='QNX'
+--- 347,353 ----
+      *-dec-osf*)
+  	OS='DEC OSF/1'
+  	CFLAGS="$CFLAGS -DOSF1"
+! 	LIBS="$LIBS -ldce -lm"
+  	;;
+      *-qnx)
+  	OS='QNX'
+***************
+*** 384,390 ****
+      *-solaris2*)
+  	OS='Solaris 2'
+  	CFLAGS="$CFLAGS -DSOLARIS2"
+! 	LIBS="$LIBS -lsocket -lnsl"
+  	DBM_LIB=""
+  	DEF_WANTHSREGEX=yes
+  	;;
+--- 387,393 ----
+      *-solaris2*)
+  	OS='Solaris 2'
+  	CFLAGS="$CFLAGS -DSOLARIS2"
+! 	LIBS="$LIBS -ldce -lthread -lsocket -lnsl -lm"
+  	DBM_LIB=""
+  	DEF_WANTHSREGEX=yes
+  	;;
+diff -c -r apache_1.2.4+ssl_1.9-orig/src/http_request.c apache_1.2.4+ssl_1.9/src/http_request.c
+*** apache_1.2.4+ssl_1.9-orig/src/http_request.c	Mon Aug 11 07:20:03 1997
+--- apache_1.2.4+ssl_1.9/src/http_request.c	Wed Oct 15 18:11:03 1997
+***************
+*** 195,200 ****
+--- 195,209 ----
+  	    *cp = '\0';
+  	    return OK;
+  	}
++ 	/* Modification for mod_auth_dce -- This check is made before
++ 	 * authentication modules are called. If the error is access
++ 	 * denied, it is possible that once DCE credentials are obtained
++ 	 * that the entry would be accessible. Therefore, return OK now,
++ 	 * and mod_auth_dce will call this function again after credentials
++ 	 * are obtained.
++ 	 */
++ 	else if (errno == EACCES)
++ 	  return OK;
+  #if defined(ENOENT) && defined(ENOTDIR)
+  	else if (errno == ENOENT || errno == ENOTDIR) {
+  #else
+diff -c -r apache_1.2.4+ssl_1.9-orig/src/md5.h apache_1.2.4+ssl_1.9/src/md5.h
+*** apache_1.2.4+ssl_1.9-orig/src/md5.h	Tue Nov 18 15:53:20 1997
+--- apache_1.2.4+ssl_1.9/src/md5.h	Wed Oct 15 18:11:03 1997
+***************
+*** 93,99 ****
+    unsigned char buffer[64];                         /* input buffer */
+  } APACHE_MD5_CTX;
+  
+! extern void MD5Init(APACHE_MD5_CTX *context);
+! extern void MD5Update(APACHE_MD5_CTX *context, const unsigned char *input,
+  		      unsigned int inputLen);
+! extern void MD5Final(unsigned char digest[16], APACHE_MD5_CTX *context);
+--- 93,99 ----
+    unsigned char buffer[64];                         /* input buffer */
+  } APACHE_MD5_CTX;
+  
+! extern void apache_MD5Init(APACHE_MD5_CTX *context);
+! extern void apache_MD5Update(APACHE_MD5_CTX *context, const unsigned char *input,
+  		      unsigned int inputLen);
+! extern void apache_MD5Final(unsigned char digest[16], APACHE_MD5_CTX *context);
+diff -c -r apache_1.2.4+ssl_1.9-orig/src/md5c.c apache_1.2.4+ssl_1.9/src/md5c.c
+*** apache_1.2.4+ssl_1.9-orig/src/md5c.c	Tue Nov 18 15:53:20 1997
+--- apache_1.2.4+ssl_1.9/src/md5c.c	Wed Oct 15 18:11:03 1997
+***************
+*** 158,164 ****
+  /* MD5 initialization. Begins an MD5 operation, writing a new context.
+   */
+  void
+! MD5Init(APACHE_MD5_CTX *context)
+  {
+      context->count[0] = context->count[1] = 0;
+    /* Load magic initialization constants. */
+--- 158,164 ----
+  /* MD5 initialization. Begins an MD5 operation, writing a new context.
+   */
+  void
+! apache_MD5Init(APACHE_MD5_CTX *context)
+  {
+      context->count[0] = context->count[1] = 0;
+    /* Load magic initialization constants. */
+***************
+*** 173,179 ****
+    context.
+   */
+  void
+! MD5Update(APACHE_MD5_CTX *context, const unsigned char *input, unsigned int inputLen)
+  {
+      unsigned int i, index, partLen;
+  
+--- 173,179 ----
+    context.
+   */
+  void
+! apache_MD5Update(APACHE_MD5_CTX *context, const unsigned char *input, unsigned int inputLen)
+  {
+      unsigned int i, index, partLen;
+  
+***************
+*** 209,215 ****
+    the message digest and zeroizing the context.
+   */
+  void
+! MD5Final(unsigned char digest[16], APACHE_MD5_CTX *context)
+  {
+      unsigned char bits[8];
+      unsigned int index, padLen;
+--- 209,215 ----
+    the message digest and zeroizing the context.
+   */
+  void
+! apache_MD5Final(unsigned char digest[16], APACHE_MD5_CTX *context)
+  {
+      unsigned char bits[8];
+      unsigned int index, padLen;
+***************
+*** 220,229 ****
+    /* Pad out to 56 mod 64. */
+      index = (unsigned int)((context->count[0] >> 3) & 0x3f);
+      padLen = (index < 56) ? (56 - index) : (120 - index);
+!     MD5Update(context, PADDING, padLen);
+  
+    /* Append length (before padding) */
+!     MD5Update(context, bits, 8);
+  
+    /* Store state in digest */
+      Encode(digest, context->state, 16);
+--- 220,229 ----
+    /* Pad out to 56 mod 64. */
+      index = (unsigned int)((context->count[0] >> 3) & 0x3f);
+      padLen = (index < 56) ? (56 - index) : (120 - index);
+!     apache_MD5Update(context, PADDING, padLen);
+  
+    /* Append length (before padding) */
+!     apache_MD5Update(context, bits, 8);
+  
+    /* Store state in digest */
+      Encode(digest, context->state, 16);
+diff -c -r apache_1.2.4+ssl_1.9-orig/src/mod_cgi.c apache_1.2.4+ssl_1.9/src/mod_cgi.c
+*** apache_1.2.4+ssl_1.9-orig/src/mod_cgi.c	Thu Jun 26 19:28:54 1997
+--- apache_1.2.4+ssl_1.9/src/mod_cgi.c	Wed Oct 15 18:11:04 1997
+***************
+*** 394,402 ****
+  			       "script not found or unable to stat");
+  #endif
+      if (!suexec_enabled) {
+!         if (!can_exec(&r->finfo))
+!             return log_scripterror(r, conf, FORBIDDEN,
+!                                    "file permissions deny server execution");
+      }
+  
+      if ((retval = setup_client_block(r, REQUEST_CHUNKED_ERROR)))
+--- 394,413 ----
+  			       "script not found or unable to stat");
+  #endif
+      if (!suexec_enabled) {
+!       /* Modification for mod_auth_dce -- This used to be a call to can_exec
+!        * in util.c; however, that function does a naive bit check to decide
+!        * if a script is executable. That fails in an environment with ACLs,
+!        * where the server may have permission based on the ACL, but not on
+!        * the Unix mode bits. The access() system call takes ACLs into account.
+!        */
+!       if(access(r->filename, X_OK)) {
+! 	if (errno == EACCES)
+! 	  return log_scripterror(r, conf, FORBIDDEN,
+! 				 "file permissions deny server execution");
+! 	else
+! 	  return log_scripterror(r, conf, SERVER_ERROR,
+! 				 "system error checking execute access");
+!       }
+      }
+  
+      if ((retval = setup_client_block(r, REQUEST_CHUNKED_ERROR)))
+diff -c -r apache_1.2.4+ssl_1.9-orig/src/mod_userdir.c apache_1.2.4+ssl_1.9/src/mod_userdir.c
+*** apache_1.2.4+ssl_1.9-orig/src/mod_userdir.c	Fri Mar  7 06:15:44 1997
+--- apache_1.2.4+ssl_1.9/src/mod_userdir.c	Wed Oct 15 18:11:04 1997
+***************
+*** 114,120 ****
+      char *name = r->uri;
+      const char *w, *dname, *redirect;
+      char *x = NULL;
+! 
+      if (userdirs == NULL || !strcasecmp(userdirs, "disabled") ||
+          (name[0] != '/') || (name[1] != '~')) {
+        return DECLINED;
+--- 114,126 ----
+      char *name = r->uri;
+      const char *w, *dname, *redirect;
+      char *x = NULL;
+!     /* Modification for mod_auth_dce -- This module previously used the
+!      * r->finfo structure for temporary storage of a local stat. This
+!      * contaminated that structure and had unexpected side effects. Adding
+!      * a local stat structure will fix the problem.
+!      */
+!     struct stat statbuf;
+!     
+      if (userdirs == NULL || !strcasecmp(userdirs, "disabled") ||
+          (name[0] != '/') || (name[1] != '~')) {
+        return DECLINED;
+***************
+*** 182,188 ****
+         in the hope that some handler might handle it. This can be used, for
+         example, to run a CGI script for the user. 
+         */
+!       if (filename && (!*userdirs || stat(filename, &r->finfo) != -1)) {
+  	r->filename = pstrcat(r->pool, filename, dname, NULL);
+  	return OK;
+        }
+--- 188,194 ----
+         in the hope that some handler might handle it. This can be used, for
+         example, to run a CGI script for the user. 
+         */
+!       if (filename && (!*userdirs || stat(filename, &statbuf) != -1)) {
+  	r->filename = pstrcat(r->pool, filename, dname, NULL);
+  	return OK;
+        }
+diff -c -r apache_1.2.4+ssl_1.9-orig/src/modules/proxy/proxy_util.c apache_1.2.4+ssl_1.9/src/modules/proxy/proxy_util.c
+*** apache_1.2.4+ssl_1.9-orig/src/modules/proxy/proxy_util.c	Tue Nov 18 15:53:21 1997
+--- apache_1.2.4+ssl_1.9/src/modules/proxy/proxy_util.c	Tue Nov 18 16:52:33 1997
+***************
+*** 560,568 ****
+      static const char table[64]=
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@";
+  
+!     MD5Init(&context);
+!     MD5Update(&context, (const unsigned char *)it, strlen(it));
+!     MD5Final(digest, &context);
+  
+  /* encode 128 bits as 22 characters, using a modified uuencoding */
+  /* the encoding is 3 bytes -> 4 characters
+--- 560,568 ----
+      static const char table[64]=
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@";
+  
+!     apache_MD5Init(&context);
+!     apache_MD5Update(&context, (const unsigned char *)it, strlen(it));
+!     apache_MD5Final(digest, &context);
+  
+  /* encode 128 bits as 22 characters, using a modified uuencoding */
+  /* the encoding is 3 bytes -> 4 characters
+diff -c -r apache_1.2.4+ssl_1.9-orig/src/util_md5.c apache_1.2.4+ssl_1.9/src/util_md5.c
+*** apache_1.2.4+ssl_1.9-orig/src/util_md5.c	Tue Nov 18 15:53:22 1997
+--- apache_1.2.4+ssl_1.9/src/util_md5.c	Wed Oct 15 18:11:04 1997
+***************
+*** 93,101 ****
+       * Take the MD5 hash of the string argument.
+       */
+  
+!     MD5Init(&my_md5);
+!     MD5Update(&my_md5, string, strlen((const char *)string));
+!     MD5Final(hash, &my_md5);
+  
+      for (i=0, r=result; i<16; i++, r+=2)
+          sprintf(r, "%02x", hash[i]);
+--- 93,101 ----
+       * Take the MD5 hash of the string argument.
+       */
+  
+!     apache_MD5Init(&my_md5);
+!     apache_MD5Update(&my_md5, string, strlen((const char *)string));
+!     apache_MD5Final(hash, &my_md5);
+  
+      for (i=0, r=result; i<16; i++, r+=2)
+          sprintf(r, "%02x", hash[i]);
+***************
+*** 158,164 ****
+  
+      encodedDigest = (char *)pcalloc(a, 25 * sizeof(char));
+  
+!     MD5Final(digest, context);
+      digest[sizeof(digest)-1] = digest[sizeof(digest)-2] = 0;
+  
+      p = encodedDigest;
+--- 158,164 ----
+  
+      encodedDigest = (char *)pcalloc(a, 25 * sizeof(char));
+  
+!     apache_MD5Final(digest, context);
+      digest[sizeof(digest)-1] = digest[sizeof(digest)-2] = 0;
+  
+      p = encodedDigest;
+***************
+*** 181,190 ****
+      long length = 0;
+      int nbytes;
+  
+!     MD5Init(&context);
+      while ((nbytes = fread(buf, 1, sizeof(buf), infile))) {
+          length += nbytes;
+!         MD5Update(&context, buf, nbytes);
+      }
+      rewind(infile);
+      return md5contextTo64(p, &context);
+--- 181,190 ----
+      long length = 0;
+      int nbytes;
+  
+!     apache_MD5Init(&context);
+      while ((nbytes = fread(buf, 1, sizeof(buf), infile))) {
+          length += nbytes;
+!         apache_MD5Update(&context, buf, nbytes);
+      }
+      rewind(infile);
+      return md5contextTo64(p, &context);

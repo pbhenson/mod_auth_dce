@@ -14,13 +14,18 @@ FILENAME=/dfs/user.file
 #LIBS=-ldce
 
 # For Transarc DCE 1.1
+CC=gcc
 LIBS=-ldce -lsocket -lnsl -lthread -lm
+
+# For AIX DCE
+#CC=xlC_r4 -DAIX
+#LIBS=-ldce -bI:../afs_syscall.aix
 
 all: test runtest
 
 test: test.c
 	@echo "Building test program"
-	@gcc -DUSERNAME=\"$(USERNAME)\" -DUSERPASS=\"$(USERPASS)\" \
+	@$(CC) -DUSERNAME=\"$(USERNAME)\" -DUSERPASS=\"$(USERPASS)\" \
             -DFILENAME=\"$(FILENAME)\" -o test test.c $(LIBS)
 
 runtest:
