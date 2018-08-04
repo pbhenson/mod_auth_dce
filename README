@@ -11,8 +11,8 @@ With mod_auth_dce, you can supply DCE users and DCE groups to the Apache
 require directive, and restrict access to files or resources so only the
 listed users or groups can access them. In this mode, mod_auth_dce will
 request authentication from the browser on every request, verify the
-identity of the browsing user, and optionally attach the user's credentials
-to the process serving the request.
+identity of the browsing user, and optionally attach the user's
+credentials to the process serving the request.
 
 When used with DFS, mod_auth_dce can also use DFS ACLs for authorization.
 In this mode, mod_auth_dce will check the DFS ACL for each request. If the
@@ -28,8 +28,8 @@ mod_auth_dce is most useful when combined with DFS. Once mod_auth_dce has
 been installed, access to files can be controlled simply by setting DFS
 ACLs, with no further web server configuration required. However, support
 of standard web server configuration directives allows mod_auth_dce to be
-useful at sites without DFS, and also for protecting resources that are not
-files, such as Apache handlers.
+useful at sites without DFS, and also for protecting resources that are
+not files, such as Apache handlers.
 
 Other features of mod_auth_dce include login context caching, and DCE
 authenticated CGI execution.
@@ -53,17 +53,6 @@ apache/src/modules directory after applying the patch. For example:
      tar cf - auth_dce | (cd /path/to/apache/src/modules && tar xf -)
 
 
-By default, mod_auth_dce has login context caching turned on. The caching
-should increase performance, but more importantly, will significantly
-decrease the load on your security server. If you wish to disable login
-context caching, you should edit the mod_auth_dce.c file and follow the
-instructions in it to disable caching.
-
-You should also edit the mod_auth_dce.c file if you want to change any
-of the cache options, such as the size or expiration time. Please see the
-mod_auth_dce.c file for details of these options. The defaults should be
-acceptable for most installations.
-
 If you are using the Apache Autoconf-style Interface (APACI), supply the
 option '--activate-module=src/modules/auth_dce/mod_auth_dce.c' to
 configure. Otherwise, edit the Configuration file and add the line
@@ -72,104 +61,177 @@ configure. Otherwise, edit the Configuration file and add the line
 
 In either case, mod_auth_dce will attempt to set compilation options
 appropriately during the configuration process. If mod_auth_dce doesn't
-recognize your OS, it will complain and use defaults that may or may
-not work.
+recognize your OS, it will give a message and fail to configure. If you
+are willing to help test mod_auth_dce for your platform, please contact
+me.
+
+Starting with version 3.0, mod_auth_dce includes a shared memory context
+cache implementation. This improves the cache hit rate over the previous
+per-process cache implementation, significantly reducing security server
+load and web server response time under heavy request patterns.
+
+Context caching is currently only supported on Solaris. For other
+platforms, mod_auth_dce will disable caching during configuration. To
+support context caching, a platform requires a shared memory mechanism
+with a method to synchronize access by multiple processes. If you are
+interested in helping test context caching on your platform, please
+contact me.
+
+While most cache functionality can be controlled via run-time
+configuration directives, statistics generation is configured at compile
+time. By default, processes will log cache statistics every 500
+authenticated accesses. To disable statistics generation or change its
+frequency, edit the mod_auth_dce.h file.
 
 
 Configuration Directives
 ------------------------
 
-  Directive                 Context         Default Value
-  ----------------------------------------------------------------
-  DCEUser                   server          -none-
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCEUser                server          -none-
 
-    To run the server with credentials, set DCEUser to the principal
-    whose credentials are to be acquired by the server. This principal
-    must have a valid account in the cell and an entry in either the
-    DCE default keytab or the keytab specified in the DCEKeytab
-    directive.
+    To run the server with credentials, set AuthDCEUser to the
+    principal whose credentials are to be acquired by the server.
+    This principal must have a valid account in the cell and an
+    entry in either the DCE default keytab or the keytab specified
+    in the AuthDCEKeytab directive.
 
-  Directive                 Context         Default Value
-  ----------------------------------------------------------------
-  DCEKeytab                 server          DCE default keytab
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCEKeytab              server          DCE default keytab
 
-    Set this directive to the full path of a keytab that contains an
-    entry for the principal specified by the DCEUser directive. If
-    omitted, the DCE default keytab will be used. Note that the
-    credentials are acquired after the server has set its uid to the
-    user specified by the User directive, so the keytab must be
-    readable by that Unix uid.
+    Set this directive to the full path of a keytab that contains
+    an entry for the principal specified by the AuthDCEUser
+    directive. If omitted, the DCE default keytab will be used.
 
-  Directive                 Context         Default Value
-  ----------------------------------------------------------------
-  DCEAuthAuthoritative      directory       On
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCECertifyIdentify     server          Off
+
+    This directive controls whether or not the login contexts
+    generated by mod_auth_dce are certified. Certification
+    verifies that the login context came from a valid security
+    server. Certification is not possible on slim DCE clients, and
+    may or may not be necessary depending on how contexts are
+    used.
+
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCEAuthoritative       directory       On
 
     When this directive is On, mod_auth_dce will either approve or
     deny a request. When the directive is Off and a request is not
-    approved (due to authentication failure or access restriction),
-    mod_auth_dce will decline to handle the request and allow other
-    lower level modules to attempt authentication.
+    approved (due to authentication failure or access
+    restriction), mod_auth_dce will decline to handle the request
+    and allow other lower level modules to attempt authentication.
 
-  Directive                 Context         Default Value
-  ----------------------------------------------------------------
-  DCEBrowserCreds           directory       On
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCEImpersonateBrowser  directory       On
 
-    When this directive is On, the credentials of the browsing user
-    will be attached to the server process for the duration of any
-    request requiring authentication. If set to Off, requests will be
-    processed using the identity and credentials (if any) of the
-    server.
+    When this directive is On, the credentials of the browsing
+    user will be attached to the server process for the duration
+    of any request requiring authentication. If set to Off,
+    requests will be processed using the identity and credentials
+    (if any) of the server.
 
-  Directive                 Context         Default Value
-  ----------------------------------------------------------------
-  AuthDCE                   directory       Off
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCE                    directory       Off
 
-    When this directive is On, DCE authentication is enabled within
-    the directory specified.
+    When this directive is On, DCE authentication is enabled
+    within the directory specified.
 
     You will also need valid AuthType, AuthName, and require
     directives in the Directory container. Currently, the only
-    supported AuthType is "Basic". List the authorized users/groups
-    for this directory in the require directive, or see below for
-    correct require configuration if AuthDFS is enabled.
+    supported AuthType is "Basic". List the authorized
+    users/groups for this directory in the require directive, or
+    see below for correct require configuration if
+    AuthDCEDFSAuthorization is enabled.
 
-  Directive                 Context         Default Value
-  ----------------------------------------------------------------
-  AuthDFS                   directory       Off
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCEDFSAuthorization    directory       Off
 
-    When this directive is On, DFS ACL checking is enabled within the
-    directory specified and mod_auth_dce will only require
-    authentication if the request is for a file not readable by the
-    server. If the server is running without DCE credentials, server
-    readability is controlled by the "any_other" entry on the DFS
-    ACL. Otherwise, it is controlled by the entries that apply to the
-    DCE identity of the server.
+    When this directive is On, DFS ACL checking is enabled within
+    the directory specified and mod_auth_dce will only require
+    authentication if the request is for a file not readable by
+    the server. If the server is running without DCE credentials,
+    server readability is controlled by the "any_other" entry on
+    the DFS ACL. Otherwise, it is controlled by the entries that
+    apply to the DCE identity of the server.
 
-    When AuthDFS is enabled, your require directive should be set to
-    "valid-user".
+    When AuthDCEDFSAuthorization is enabled, your require
+    directive should be set to "valid-user".
 
-  Directive                 Context         Default Value
-  ----------------------------------------------------------------
-  DCEIncludePW              directory       Off
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCEIncludePW           directory       Off
 
     Setting this directive to On will enable passing the browser's
-    password to CGI programs via the environment variable DCEPW. Only
-    enable this directive on web servers that do not allow interactive
-    logins. Otherwise, users could use the ps command to potentially
-    acquire plaintext passwords.
+    password to CGI programs via the environment variable DCEPW.
+    Only enable this directive on web servers that do not allow
+    interactive logins. Otherwise, users could use the ps command
+    to potentially acquire plaintext passwords.
 
-  Directive                 Context         Default Value
-  ----------------------------------------------------------------
-  DCEDirectoryIndex         directory       DirectoryIndex default
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCEDirectoryIndex      directory       DirectoryIndex default
 
-    This directive should be set to the same list of valid index files
-    as the DirectoryIndex directive.
+    This directive should be set to the same list of valid index
+    files as the DirectoryIndex directive.
 
     mod_auth_dce needs this information to correctly serve server
     readable index files in non server readable directories when
-    AuthDFS is enabled. Unfortunately, the list already specified with
-    DirectoryIndex is not available to mod_auth_dce, necessitating
-    this seemingly redundant directive.
+    AuthDCEDFSAuthorization is enabled. Unfortunately, the list
+    already specified with DirectoryIndex is not available to
+    mod_auth_dce, necessitating this seemingly redundant
+    directive.
+
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCECacheBuckets        server          1000
+
+    This directive configures how many buckets are in the cached
+    context hash table. Increase this if messages reporting "no
+    empty slots found in bucket" appear frequently in the error
+    log.
+
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCECacheLifetime       server          21600 (6 hours)
+
+    This directive, along with the following two, controls how
+    long a context remains in the cache. A context will be in the
+    cache no longer than the sum of AuthDCECacheLifetime +
+    AuthDCECacheGracePeriod, which should be at most the valid
+    ticket lifetime in your DCE cell.
+
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCECacheMaxIdle        server          14400 (4 hours)
+
+    This directive controls how long a cached context can remain
+    unused before being removed from the cache.
+
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCECacheGracePeriod    server          7200 (2 hours)
+
+    This directive controls the maximum amount of time a context
+    marked as in use is retained in the cache after its lifetime
+    expires. It should be at least the estimated maximum time an
+    authenticated request will take to process.
+
+  Directive                  Context         Default Value
+  -----------------------------------------------------------------
+  AuthDCECacheSweepInterval  server          1800 (30 minutes)
+
+    This directive controls how often the cache maintenance thread
+    sweeps looking for cached contexts that can be removed. If
+    cache statistics generation is enabled, utilization statistics
+    are reported on each sweep.
 
 
 NOTE: Previous versions of the documentation recommended not checking
@@ -187,24 +249,23 @@ Your first decision when configuring mod_auth_dce is whether or not to
 start the server with DCE credentials.  If you start the server with
 credentials, then all requests, authenticated or not, are processed either
 with the credentials of the server or the credentials of the browsing
-user. If the server is not started with credentials, then non-authenticated
-requests are processed with no credentials, while authenticated requests
-may be processed with the credentials of the authenticated browsing
-user. If you are serving files in DFS, and the server has no credentials,
-then any file to be served without authentication must by readable by
-any_other. On the other hand, if the server has credentials, then files may
-be served from DFS that are readable by the server principal, but not
-necessarily by anyone else. This, for example, allows you to have CGIs that
-anyone can execute, but no one can view. To run the server with
-credentials, you must specify a valid DCE principal/account via the DCEUser
-configuration directive. This account must have a valid keytab on the
-system, readable by the Unix identity of the web server. Since you probably
-do not want to have your system keytab readable by the web server, you most
-likely need to use the DCEKeytab configuration directive to specify an
-alternative keytab file. Note that only the child server processes obtain
-credentials, while the parent runs with no credentials. Therefore, logs
-must be writable by the Unix identity of the parent server, generally root,
-or for logs in DFS, the DCE identity of the machine, generally
+user. If the server is not started with credentials, then
+non-authenticated requests are processed with no credentials, while
+authenticated requests may be processed with the credentials of the
+authenticated browsing user. If you are serving files in DFS, and the
+server has no credentials, then any file to be served without
+authentication must by readable by any_other. On the other hand, if the
+server has credentials, then files may be served from DFS that are
+readable by the server principal, but not necessarily by anyone else.
+This, for example, allows you to have CGIs that anyone can execute, but no
+one can view. To run the server with credentials, you must specify a valid
+DCE principal/account via the AuthDCEUser configuration directive. This
+account must have a valid keytab on the system. To use a non-default
+keytab, the AuthDCEKeytab directive can be used.  Note that only the child
+server processes run with web server credentials, while the parent runs
+with the credentials it was started with, if any. Therefore, logs must be
+writable by the Unix identity of the parent server, generally root, or for
+logs in DFS, the DCE identity of the machine, generally
 hosts/hostname/self.
 
 Your next decision is which, if any, pieces of your web space you wish to
@@ -214,16 +275,17 @@ piece and include an AuthDCE directive (set to On). Then, you must decide
 whether to restrict access based on explicitly named users/groups, or via
 DFS ACLs. To use explicitly named users/groups, provide require directives
 listing the authorized users and/or groups. To use DFS ACLs for access
-control, include the AuthDFS directive (set to On) and a require directive
-(set to valid-user).
+control, include the AuthDCEDFSAuthorization directive (set to On) and a
+require directive (set to valid-user).
 
 For authenticated requests, you must decide whether or not to attach the
 credentials of the authenticated browser to the process serving the
-request. This is the default behavior, and if you are using AuthDFS, is
-required. If you started the server with credentials, and wish to serve the
-request using the credentials of the server rather than the credentials of
-the authenticated browser, you must disable this behavior by including the
-DCEBrowserCreds directive (set to Off).
+request. This is the default behavior, and if you are using
+AuthDCEDFSAuthorization, is required. If you started the server with
+credentials, and wish to serve the request using the credentials of the
+server rather than the credentials of the authenticated browser, you must
+disable this behavior by including the AuthDCEImpersonateBrowser directive
+(set to Off).
 
 
 DCE Authenticated CGIs
@@ -235,14 +297,14 @@ credentials of the browsing user. This feature can be used to create easy
 to use remote DCE administration CGIs. For an example of the potential of
 this feature, please see
 
-     http://www.csupomona.edu/~intranet/services/
+     http://www.csupomona.edu/intranet/services/
 
 
 The identity of the browser is available to the CGI via the standard
-REMOTE_USER environment variable. If DCEIncludePW is set, then the
+REMOTE_USER environment variable. If AuthDCEIncludePW is set, then the
 browser's DCE password is also available to the CGI via the DCEPW
-environment variable. Do not set DCEIncludePW on a web server that also
-allows user logins, or the ps command could potentially be used to
+environment variable. Do not set AuthDCEIncludePW on a web server that
+also allows user logins, or the ps command could potentially be used to
 compromise passwords.
 
 You shouldn't allow untrusted users to place CGIs in a DCE authenticated

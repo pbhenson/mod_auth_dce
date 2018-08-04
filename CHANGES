@@ -1,3 +1,27 @@
+3.0 - Implemented new shared memory context cache, with the following
+      new configuration directives: AuthDCECacheBuckets,
+      AuthDCECacheLifetime, AuthDCECacheMaxIdle, AuthDCECacheGracePeriod,
+      AuthDCECacheSweepInterval. Caching is only supported on Solaris
+      in this release.
+
+    - Added new directive AuthDCECertifyIdentify.
+
+    - Renamed following directives: DCEUser to AuthDCEUser, DCEKeytab to
+      AuthDCEKeytab, DCEAuthAuthoritative to AuthDCEAuthoritative,
+      DCEBrowserCreds to AuthDCEImpersonateBrowser, AuthDFS to
+      AuthDCEDFSAuthorization, DCEIncludePW to AuthDCEIncludePW,
+      DCEDirectoryIndex to AuthDCEDirectoryIndex.
+
+    - Modified server credential support to generate and maintain
+      credentials in parent process rather than per child process.
+
+    - Updated sample httpd.conf to match current Cal Poly Pomona
+      Intranet configuration.
+
+    - Much thanks to Craig Rich for his invaluable assistance
+      developing this version.
+
+
 2.5 - Updated logging code to use 1.3 API.
 
     - Updated configuration to utilize 1.3 auto-configure capabilities.

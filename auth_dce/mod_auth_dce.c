@@ -3,7 +3,7 @@
  *
  * Paul Henson <henson@acm.org>
  *
- * Copyright (c) 1996,1997,1998,1999 Paul Henson -- see COPYRIGHT file for details
+ * Copyright (c) 1996-2000 Paul Henson -- see COPYRIGHT file for details
  *
  */
 
@@ -13,12 +13,17 @@
 
     case "$PLAT" in
     
-      *-ibm-aix-4.*)
+      *-ibm-aix4.*)
+        echo "  mod_auth_dce: Note - context caching not supported on this platform."
         CC=xlC_r4
-        LDFLAGS="$LDFLAGS -bI:`pwd`/modules/auth_dce/afs_syscall.aix -lm -ldce"
+	CFLAGS="$CFLAGS -DNO_CACHING"
+        LDFLAGS="$LDFLAGS -ldce -lm"
         ;;
 
       *-dec-osf*)
+        echo "  mod_auth_dce: Note - context caching not supported on this platform."
+	CFLAGS="$CFLAGS -std -threads -DNO_CACHING"
+	LDFLAGS="$LDFLAGS -threads"
         LIBS="$LIBS -ldce -lm"
         ;;
       
@@ -31,13 +36,16 @@
             26*)
                 LIBS="$LIBS -ldce -lpthread -lsocket -lnsl"
                 ;;
+	    *)
+	        echo "  mod_auth_dce: This version of Solaris is not currently supported."
+		exit 1
+		;;
         esac
 	;;
 
       *)
 	echo "  mod_auth_dce: I don't know how to compile DCE applications on this platform."
-	echo "                Adding -ldce to LIBS, this may or may not work."
-	LIBS="$LIBS -ldce"
+	exit 1
 	;;
 	
     esac
@@ -46,20 +54,16 @@
  * MODULE-DEFINITION-END
  */
 
-/* Include file to access DCE error text */
-#include <dce/dce_error.h>
-
-/* Include file to access DCE thread API */
+#if defined(HPUX) || defined(HPUX10) || defined(HPUX11) /* I guess HPSUX just had to be different */
+#include <pthread.h>
+#else
 #include <dce/pthread.h>
+#endif
 
-/* Include file to access DCE security login API */
+#include <dce/dce_error.h>
 #include <dce/sec_login.h>
-
-/* Include files to access DCE security registry API */
 #include <dce/binding.h>
 #include <dce/pgo.h>
-
-/* Include files to access Apache module API */
 #include "httpd.h"
 #include "http_config.h"
 #include "http_core.h"
@@ -67,403 +71,495 @@
 #include "http_main.h"
 #include "http_protocol.h"
 #include "util_script.h"
-#include "ap_md5.h"
+#include "mod_auth_dce.h"
 
-/* In AIX land, afs_syscall is called kafs_syscall.
- * Variety is the spice of life, after all....
- */
-#ifdef AIX
-#define afs_syscall kafs_syscall
+
+#ifndef NO_CACHING
+#ifdef SOLARIS2
+static char krb5_env[] = "KRB5CCNAME=FILE:/opt/dcelocal/var/security/creds/dcecred_XXXXXXXX";
+static char *krb5_env_pag = krb5_env+57;
+#else
+#error Credential cache directory not known for this platform.
+#endif
+static unsigned32 server_pag = 0;
 #endif
 
-
-/* Comment out to disable login context caching */
-#define CACHING
+static sec_login_handle_t server_context = NULL;
 
 
-/* Parameters and prototypes for cache when enabled */
-#ifdef CACHING
-
-/* System call to reset the DFS PAG */
-#define AFSCALL_RESETPAG 20
-
-/* How many entries to cache */
-#define CACHE_SIZE 100
-
-/* How long to keep an entry in the cache (in seconds, default 12 hours) */
-#define CACHE_TTL (60*60*12)
-
-/* Comment out following two defines to disable cache statistic generation */
-#define CACHE_STATS
-/* How often to output statistics */
-#define CACHE_STAT_INTERVAL 500
-
-/* Prototypes for cache interface */
-static int find_cached_context(request_rec *r, sec_login_handle_t *, char *, char *);
-static void add_cached_context(request_rec *r, sec_login_handle_t *, char *, char *);
-static void delete_cached_contexts();
+server_config_rec auth_dce_server_config = {
+  NULL,  /* default user */
+  NULL,  /* default keytab */
+  0,     /* default certify_identity */
+#ifndef NO_CACHING
+  1000,  /* default cache_buckets */
+  7200,  /* default cache_graceperiod */
+  21600, /* default cache_lifetime */
+  14400, /* default cache_max_idle */
+  1800   /* default cache_sweep_interval */
 #endif
-
-/* Prototype for context refreshing thread */
-static pthread_addr_t refresh_context(pthread_addr_t arg);
-     
-/* Structure to hold server-level configuration. Currently unused because
- * the Apache API won't allow us to set them in the stage needed.
- */
-typedef struct dce_server_config_struct {
-  char *placeholder; /* Needed because some compilers barf on empty structs */
-} dce_server_config_rec;
-
-/* Global variables to hold server-level configuration.  See previous comment */
-static char *dce_user = NULL;
-static char *dce_keytab = NULL;
+};
 
 
-/* Function to create and return an empty per-server module
- * configuration structure.
- */
-static void *create_dce_server_config(pool *p, server_rec *s)
+static pthread_addr_t refresh_context(pthread_addr_t arg)
 {
-  return ap_pcalloc (p, sizeof(dce_server_config_rec));
+  signed32 expiration_time;
+  time_t now;
+  struct timespec sleep_interval;
+  error_status_t dce_st;
+  dce_error_string_t dce_error;
+  int dce_error_st;
+  sec_login_auth_src_t auth_src;
+  unsigned32 kvno_worked;
+  boolean32 reset_passwd;
+  server_rec *s = (server_rec *)arg;
+
+  DEBUG_S("auth_dce.refresh_context: beginning context refresh loop");
+  
+  while (1)
+    {
+      now = time(NULL);
+
+      sec_login_get_expiration(server_context, &expiration_time, &dce_st);
+      if (dce_st && (dce_st != sec_login_s_not_certified))
+	{
+	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, s,
+		       "auth_dce.refresh_context: sec_login_get_expiration failed - %s (%d)", dce_error, dce_st);
+	  expiration_time = now + 20 * 60;
+	}
+
+      DEBUG_S("auth_dce.refresh_context: context expires at time %d", expiration_time);
+      
+      sleep_interval.tv_sec = expiration_time - now - 10 * 60;
+      sleep_interval.tv_nsec = 0;
+      
+      pthread_delay_np(&sleep_interval);
+	
+      sec_login_refresh_identity(server_context, &dce_st);
+      if (dce_st)
+	{
+	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, s,
+		       "auth_dce.refresh_context: sec_login_refresh_identity failed - %s (%d)", dce_error, dce_st);
+	}
+      
+      sec_login_valid_from_keytable(server_context, rpc_c_authn_dce_secret, auth_dce_server_config.keytab, (unsigned32) NULL, &kvno_worked,
+				    &reset_passwd, &auth_src, &dce_st);
+      if (dce_st)
+	{
+	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, s,
+		       "auth_dce.refresh_context: sec_login_valid_from_keytable failed - %s (%d)", dce_error, dce_st);
+	}
+    }		   
 }
 
-/* Function that is called to merge two server configurations. */
-static void *merge_dce_server_configs(pool *p, void *basev, void *addv)
-{
-  dce_server_config_rec *new = (dce_server_config_rec*)ap_pcalloc(p, sizeof(dce_server_config_rec));
-  dce_server_config_rec *base = (dce_server_config_rec *)basev;
-  dce_server_config_rec *add = (dce_server_config_rec *)addv;
 
+void auth_dce_purge_context(server_rec *s, unsigned long pag)
+{
+  sec_login_handle_t login_context;
+  error_status_t dce_st;
+  dce_error_string_t dce_error;
+  int dce_error_st;
+
+  DEBUG_S("auth_dce.purge_context called for pag %08x", pag);
+  
+  sec_login_context_from_pag(pag, &login_context, &dce_st);
+  if (dce_st)
+    {
+      dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+      ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, s,
+		   "auth_dce.purge_context: sec_login_context_from_pag failed - %s (%d)", dce_error, dce_st);
+      return;
+    }
+  
+  sec_login_purge_context(&login_context, &dce_st);
+}	
+
+
+static void *create_server_config(pool *p, server_rec *s)
+{
+  return ap_pcalloc (p, sizeof(server_config_rec));
+}
+
+static void *merge_server_configs(pool *p, void *basev, void *addv)
+{
+  server_config_rec *new = (server_config_rec*)ap_pcalloc(p, sizeof(server_config_rec));
+  server_config_rec *base = (server_config_rec *)basev;
+  server_config_rec *add = (server_config_rec *)addv;
+  
   return new;
 }
 
-/* Function to handle DCEUser configuration directive */
-static const char *set_user(cmd_parms *cmd, void *dv, const char *args)
+static const char *set_user(cmd_parms *cmd, void *dv, char *word1)
 {
-  dce_user = ap_pstrcat(cmd->pool, args, NULL);
-
+  auth_dce_server_config.user = (word1) ? ap_pstrdup(cmd->pool, word1) : NULL;
   return NULL;
 }
 
-/* Function to handle DCEKeytab configuration directive */
-static const char *set_keytab(cmd_parms *cmd, void *dv, const char *args)
+static const char *set_keytab(cmd_parms *cmd, void *dv, char *word1)
 {
-  dce_keytab = ap_pstrcat(cmd->pool, "FILE:", args, NULL);
-
+  auth_dce_server_config.keytab = ap_pstrcat(cmd->pool, "FILE:", word1, NULL);
   return NULL;
 }
 
-
-/* Define module structure for per-directory configuration. do_auth_dce
- * determines whether DCE authentication is turned on in a given directory,
- * do_auth_dfs controls whether the module uses DFS ACLs for authorization,
- * index_names lists the possible valid index files for a directory,
- * do_include_pw controls whether a CGI is passed the DCE password of the browser
- * when invoked, do_browser_creds controls whether we use the browser's creds or
- * not, and do_auth_authoritative determines whether the module should deny the
- * request if authentication fails or allow other modules to try.
- */
-typedef struct auth_dce_config_struct {
-  int do_auth_dce;
-  int do_auth_dfs;
-  int do_include_pw;
-  int do_browser_creds;
-  int do_auth_authoritative;
-  char *index_names;
-} auth_dce_config_rec;
-
-
-/* Function to create and return an empty per-directory module
- * configuration structure.
- */
-void *create_auth_dce_dir_config(pool *p, char *d)
+static const char *set_certify_identity(cmd_parms *cmd, void *mconfig, int bool)
 {
-    auth_dce_config_rec *new = (auth_dce_config_rec*)ap_pcalloc(p, sizeof(auth_dce_config_rec));
-    new->do_browser_creds = 1;
-    new->do_auth_authoritative = 1;
+  auth_dce_server_config.certify_identity = bool;
+  return NULL;
+}
+
+#ifndef NO_CACHING
+static const char *set_cache_buckets(cmd_parms *cmd, void *dv, char *word1)
+{
+  auth_dce_server_config.cache_buckets = atoi(word1);
+  if (auth_dce_server_config.cache_buckets < 1 || auth_dce_server_config.cache_buckets > 50000)
+    return "auth_dce: invalid cache_buckets value";
+  
+  return NULL;
+}
+
+static const char *set_cache_graceperiod(cmd_parms *cmd, void *dv, char *word1)
+{
+  auth_dce_server_config.cache_graceperiod = atoi(word1);
+  if (auth_dce_server_config.cache_graceperiod < 0)
+    return "auth_dce: invalid negative cache_graceperiod";
+  
+  return NULL;
+}
+
+static const char *set_cache_lifetime(cmd_parms *cmd, void *dv, char *word1)
+{
+  auth_dce_server_config.cache_lifetime = atoi(word1);
+  if (auth_dce_server_config.cache_lifetime < 3600)
+    return "auth_dce: invalid cache_buckets value < 3600 seconds";
+  
+  return NULL;
+}
+
+static const char *set_cache_max_idle(cmd_parms *cmd, void *dv, char *word1)
+{
+  auth_dce_server_config.cache_max_idle = atoi(word1);
+  if (auth_dce_server_config.cache_max_idle < 0)
+    return "auth_dce: invalid cache_max_idle < 0";
+  
+  return NULL;
+}
+
+static const char *set_cache_sweep_interval(cmd_parms *cmd, void *dv, char *word1)
+{
+  auth_dce_server_config.cache_sweep_interval = atoi(word1);
+  if (auth_dce_server_config.cache_sweep_interval < 300)
+    return "auth_dce: invalid cache_sweep_interval < 300 seconds";
+  
+  return NULL;
+}
+#endif
+
+static const char *set_indexes(cmd_parms *cmd, void *dv, const char *args)
+{
+  dir_config_rec *dir_config = (dir_config_rec *)dv;
+  dir_config->index_names = ap_pstrcat(cmd->pool, args, NULL);
+  return NULL;
+}
+
+static void *create_dir_config(pool *p, char *d)
+{
+    dir_config_rec *new = (dir_config_rec*)ap_pcalloc(p, sizeof(dir_config_rec));
+    new->impersonate_browser = 1;
+    new->authoritative = 1;
     
     return new;
 }
 
-/* Function that is called to merge two directory configurations. */
-void *merge_dce_dir_configs(pool *p, void *basev, void *addv)
+static void *merge_dir_configs(pool *p, void *basev, void *addv)
 {
-  auth_dce_config_rec *new = (auth_dce_config_rec*)ap_pcalloc(p, sizeof(auth_dce_config_rec));
-  auth_dce_config_rec *base = (auth_dce_config_rec *)basev;
-  auth_dce_config_rec *add = (auth_dce_config_rec *)addv;
+  dir_config_rec *new = (dir_config_rec*)ap_pcalloc(p, sizeof(dir_config_rec));
+  dir_config_rec *base = (dir_config_rec *)basev;
+  dir_config_rec *add = (dir_config_rec *)addv;
 
-  new->do_auth_dce = add->do_auth_dce;
-  new->do_auth_dfs = add->do_auth_dfs;
-  new->do_include_pw = add->do_include_pw;
-  new->do_browser_creds = add->do_browser_creds;
-  new->do_auth_authoritative = add->do_auth_authoritative;
+  new->active = add->active;
+  new->dfs_authorization = add->dfs_authorization;
+  new->include_pw = add->include_pw;
+  new->impersonate_browser = add->impersonate_browser;
+  new->authoritative = add->authoritative;
   new->index_names = (add->index_names) ? (add->index_names) : (base->index_names);
   
   return new;
 }
 
 
-/* Function that handles the DCEDirectoryIndex configuration directive. */
-static const char *set_indexes(cmd_parms *cmd, void *dv, const char *args)
-{
-  auth_dce_config_rec *d = (auth_dce_config_rec *)dv;
-
-  d->index_names = ap_pstrcat(cmd->pool, args, NULL);
-
-  return NULL;
-}
-
-
-/* This structure defines the configuration commands this module
- * is willing to handle.
- */
-command_rec auth_dce_cmds[] = {
-  { "AuthDCE", ap_set_flag_slot, (void *) XtOffsetOf(auth_dce_config_rec, do_auth_dce), OR_AUTHCFG, FLAG,
+static command_rec cmds[] = {
+  { "AuthDCE", ap_set_flag_slot, (void *) XtOffsetOf(dir_config_rec, active), OR_AUTHCFG, FLAG,
     "Perform DCE authentication in this directory?" },
-  { "AuthDFS", ap_set_flag_slot, (void *) XtOffsetOf(auth_dce_config_rec, do_auth_dfs), OR_AUTHCFG, FLAG,
+  
+  { "AuthDCEDFSAuthorization", ap_set_flag_slot, (void *) XtOffsetOf(dir_config_rec, dfs_authorization), OR_AUTHCFG, FLAG,
     "Use DFS ACLs for authorization in this directory?" },
-  { "DCEIncludePW", ap_set_flag_slot, (void *) XtOffsetOf(auth_dce_config_rec, do_include_pw), OR_AUTHCFG, FLAG,
+  
+  { "AuthDCEIncludePW", ap_set_flag_slot, (void *) XtOffsetOf(dir_config_rec, include_pw), OR_AUTHCFG, FLAG,
     "Include DCE password for CGIs run in this directory?" },
-  { "DCEBrowserCreds", ap_set_flag_slot, (void *) XtOffsetOf(auth_dce_config_rec, do_browser_creds), OR_AUTHCFG, FLAG,
-    "Attach browser's credentials when accessing files or running CGIs" },
-  { "DCEUser", set_user, NULL, RSRC_CONF, RAW_ARGS,
+  
+  { "AuthDCEImpersonateBrowser", ap_set_flag_slot, (void *) XtOffsetOf(dir_config_rec, impersonate_browser), OR_AUTHCFG, FLAG,
+    "Attach browser's credentials when accessing files or running CGIs?" },
+  
+  { "AuthDCEUser", set_user, NULL, RSRC_CONF, TAKE1,
     "DCE identity to run web server as" },
-  { "DCEKeytab", set_keytab, NULL, RSRC_CONF, RAW_ARGS,
+  
+  { "AuthDCEKeytab", set_keytab, NULL, RSRC_CONF, TAKE1,
     "Keytab to use if different than default" },
-  { "DCEAuthAuthoritative", ap_set_flag_slot, (void *) XtOffsetOf(auth_dce_config_rec, do_auth_authoritative), OR_AUTHCFG, FLAG,
+  
+  { "AuthDCEAuthoritative", ap_set_flag_slot, (void *) XtOffsetOf(dir_config_rec, authoritative), OR_AUTHCFG, FLAG,
     "Make DCE Authoritative" },
-  { "DCEDirectoryIndex", set_indexes, NULL, OR_INDEXES, RAW_ARGS,
+  
+  { "AuthDCEDirectoryIndex", set_indexes, NULL, OR_INDEXES, RAW_ARGS,
     "Set this identical to DirectoryIndex if set" },
+  
+  { "AuthDCECertifyIdentity", set_certify_identity, NULL, RSRC_CONF, FLAG,
+    "Certify DCE Identity" },
+
+#ifndef NO_CACHING
+  { "AuthDCECacheBuckets", set_cache_buckets, NULL, RSRC_CONF, TAKE1,
+    "Number of buckets in credential hash table" },
+  
+  { "AuthDCECacheGracePeriod", set_cache_graceperiod, NULL, RSRC_CONF, TAKE1,
+    "Time in seconds" },
+ 
+  { "AuthDCECacheLifetime", set_cache_lifetime, NULL, RSRC_CONF, TAKE1,
+    "Time in seconds after which credentials are removed" },
+  
+  { "AuthDCECacheMaxIdle", set_cache_max_idle, NULL, RSRC_CONF, TAKE1,
+    "Time in seconds after which unused credentials are considered idle" },
+  
+  { "AuthDCECacheSweepInterval", set_cache_sweep_interval, NULL, RSRC_CONF, TAKE1,
+    "Frequency in seconds to sweep cache for credential removal" },
+#endif
+  
   { NULL }
 };
 
 
-/* Declaration for the module configuration variable. The variable
- * is defined at this end of the module source code file.
- */
 module auth_dce_module;
 
-/* Variable to hold the server's DCE context if server is running authenticated. */
-static sec_login_handle_t server_context = NULL;
-
-/* Function to verify DCE username/password and obtain network credentials. */
-int authenticate_dce_user (request_rec *r)
+static int authenticate(request_rec *r)
 {
-  /* Store password sent by the user */
   char *sent_pw;
-
-  /* Store DCE login context */
   sec_login_handle_t login_context;
-
-  /* DCE functions return status in this variable */
   error_status_t dce_st;
-
-  /* String to store text for a given error code */
   dce_error_string_t dce_error;
-
-  /* Variable to check the status of the error-code-to-text call */
   int dce_error_st;
-     
-  /* What type of credentials were obtained */
   sec_login_auth_src_t auth_src;
-
-  /* Structure passed to DCE to verify user's password */
   sec_passwd_rec_t pw_entry;
-
-  /* String type to pass pasword to DCE */
   sec_passwd_str_t dce_pw;
-
-  /* Whether or not the password has expired */
   boolean32 reset_passwd;
+  request_config_rec *request_config;
 
-  
-  /* Obtain the per-directory configuration for this request */
-  auth_dce_config_rec *a = (auth_dce_config_rec *)
-    ap_get_module_config (r->per_dir_config, &auth_dce_module);
+  dir_config_rec *dir_config = (dir_config_rec *)ap_get_module_config(r->per_dir_config, &auth_dce_module);
 
-  
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: called for URI %s", r->uri);
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: called for filename %s", r->filename);
+  DEBUG_R("auth_dce.authenticate: called for URI %s", r->uri);
+  DEBUG_R("auth_dce.authenticate: called for filename %s", r->filename);
 
-
-  /* Is DCE authentication turned on for this request? If not, decline it */
-  if (!a->do_auth_dce)
+  if (!dir_config->active)
     {
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: do_auth_dce not set, returning DECLINED");
+      DEBUG_R("auth_dce.authenticate: active not set, returning DECLINED");
+
       return DECLINED;
     }
 
-  
-  /* If check_dfs_acl() didn't set the request_config variable, we don't
-   * need credentials to complete the request. Return OK without bothering
-   * with DCE calls.   */
-  if (!ap_get_module_config(r->request_config, &auth_dce_module))
+  if (!(request_config = (request_config_rec *)ap_get_module_config(r->request_config, &auth_dce_module)))
     {
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: request_config not set, returning OK");
+      DEBUG_R("auth_dce.authenticate: request_config not set, returning OK");
+      if (server_context)
+	ap_table_set(r->subprocess_env, "KRB5CCNAME", getenv("KRB5CCNAME"));
+
       return OK;
     }
 
+  ap_get_basic_auth_pw(r, (const char **)&sent_pw);
+
+  DEBUG_R("auth_dce.authenticate: request made by user %s", r->connection->user);
   
-  /* dce_log_transaction() checks the request_config variable when it tries
-   * to purge or release the DCE context. Set it to NULL initially.
-   */
-  ap_set_module_config(r->request_config, &auth_dce_module, NULL);
+#ifndef NO_CACHING
+  auth_dce_find_cached_context(r, request_config, r->connection->user, sent_pw);
 
-  
-  /* Call Apache function to extract the username and password information
-   * from the request.
-   */
-  ap_get_basic_auth_pw (r, (const char **)&sent_pw);
-
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: request made by user %s", r->connection->user);
-
-  /* ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: password is %s", sent_pw); */
-  
-
-#ifdef CACHING
-  if (!find_cached_context(r, &login_context, r->connection->user, sent_pw))
+  if (!request_config->pag)
     {
 #endif
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: calling sec_login_setup_identity");
+
+      DEBUG_R("auth_dce.authenticate: calling sec_login_setup_identity");
   
-      /* sec_login_setup_identity() verifies that the username given is
-       * correct and does the initial setup of the login context.
-       */
       if (!sec_login_setup_identity((unsigned_char_p_t)r->connection->user, sec_login_no_flags,
                                     &login_context, &dce_st))
         {
-          /* Invalid username. Clean up and return */
           dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-          ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, r, "authenticate_dce_user: sec_login_setup_identity failed for %s - %s", r->connection->user, dce_error);
+          ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
+			"auth_dce.authenticate: sec_login_setup_identity failed for %s - %s (%d)", r->connection->user, dce_error, dce_st);
       
-          sec_login_purge_context(&login_context, &dce_st);
-
-	  /* If this module is authoratitive and authentication fails, refuse request and return
-	   * AUTH_REQUIRED, otherwise deline the request and allow another module to give it a shot.
-	   */
-	  if (a->do_auth_authoritative)
+	  if (dir_config->authoritative)
 	    {
 	      ap_note_basic_auth_failure(r);
-	      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: returning AUTH_REQUIRED");
+	      DEBUG_R("auth_dce.authenticate: returning AUTH_REQUIRED");
+	      
 	      return AUTH_REQUIRED;
 	    }
 	  else
 	    {
-	      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: DCEAuthAuthoritative off, returning DECLINED");
+	      DEBUG_R("auth_dce.authenticate: AuthDCEAuthoritative off, returning DECLINED");
+	      
 	      return DECLINED;
 	    }
 	}
 
-      /* Now that the username has been verified, set up the structure
-       * to validate the password.
-       */
       pw_entry.version_number = sec_passwd_c_version_none;
       pw_entry.pepper = NULL;
       pw_entry.key.key_type = sec_passwd_plain;
           
       strncpy( (char *)dce_pw, sent_pw, sec_passwd_str_max_len);
-      dce_pw[sec_passwd_str_max_len] = ' ';
+      dce_pw[sec_passwd_str_max_len] = '\0';
       pw_entry.key.tagged_union.plain = &(dce_pw[0]);
 
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: calling sec_login_validate_identity");
-
-          
-      /* sec_login_validate_identity() verifies that the correct password has
-       * been furnished and completes the setup of the login context. It also
-       * returns whether the user's password has expired, and what source
-       * supplied the authorization.
-       */
+      DEBUG_R("auth_dce.authenticate: calling sec_login_validate_identity");
+      
       if (!sec_login_validate_identity(login_context, &pw_entry, &reset_passwd,
                                        &auth_src, &dce_st))
         {
-          /* Wrong password. Clean up and return */
           dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-          ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, r, "authenticate_dce_user: sec_login_validate_ident failed for %s - %s", r->connection->user, dce_error);
+          ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
+			"auth_dce.authenticate: sec_login_validate_identity failed for %s - %s (%d)", r->connection->user, dce_error, dce_st);
+	  
           sec_login_purge_context(&login_context, &dce_st);
           ap_note_basic_auth_failure(r);
-          ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: returning AUTH_REQUIRED");
+          DEBUG_R("auth_dce.authenticate: returning AUTH_REQUIRED");
+	  
           return AUTH_REQUIRED;
         }
         
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: calling sec_login_certify_identity");
-              
-      /* sec_login_certify_identity() ensures that the correct security
-       * server validated the password.
-       */
-      if (!sec_login_certify_identity(login_context, &dce_st))
-        {
-          dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-          ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, r, "authenticate_dce_user: certify_identity failed for %s - %s", r->connection->user, dce_error);
-
-          /* The username/password failed certification. Remove whatever
-           * login context was obtained, note the authorization failure
-           * (which arranges for the correct headers to be returned to
-           * the browser), and return authorization still required.
-           * It would be nice to distinguish this failure from an invalid
-           * username or password, but we don't have that mechanism.
-           */
-          sec_login_purge_context(&login_context, &dce_st);
-          ap_note_basic_auth_failure(r);
-          return AUTH_REQUIRED;
-        }
+      if (auth_dce_server_config.certify_identity)
+	{
+	  DEBUG_R("auth_dce.authenticate: calling sec_login_certify_identity");
+	  
+	  if (!sec_login_certify_identity(login_context, &dce_st))
+	    {
+	      dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+	      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
+			    "auth_dce.authenticate: sec_login_certify_identity failed for %s - %s (%d)", r->connection->user, dce_error, dce_st);
+	      
+	      sec_login_purge_context(&login_context, &dce_st);
+	      ap_note_basic_auth_failure(r);
+	      DEBUG_R("auth_dce.authenticate: returning AUTH_REQUIRED");
+	      
+	      return AUTH_REQUIRED;
+	    }
+	}
           
-      /* Check what source provided the user's credentials. If they're
-       * not network credentials, they won't do us much good.
-       */
       if (auth_src != sec_login_auth_src_network)
         {
-          ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, r, "authenticate_dce_user: no network credentials for %s", r->connection->user);
+          ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
+			"auth_dce.authenticate: no network credentials for %s", r->connection->user);
 
-          /* The source must have been local (meaning the security
-           * server couldn't be reached, and a local cache was used to
-           * validate the password). This means we don't have network
-           * credentials, and since the whole point of this is to access
-           * files in DFS, we give up. Remove whatever login context was
-           * obtained, note the authorization failure (which arranges for
-           * the correct headers to be returned to the browser), and
-           * return authorization still required. It would be nice to
-           * distinguish this failure from an invalid username or
-           * password, but we don't have that mechanism.
-           */
           sec_login_purge_context(&login_context, &dce_st);
           ap_note_basic_auth_failure(r);
+	  DEBUG_R("auth_dce.authenticate: returning AUTH_REQUIRED");
+	  
           return AUTH_REQUIRED;
         }
           
 
-#ifdef CACHING
-      add_cached_context(r, &login_context, r->connection->user, sent_pw);
-    }
-#endif
-
-  /* If we need to use the browser's credential for this request, attach them to this server process. */
-  if (a->do_browser_creds)
-    {
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: calling sec_login_set_context");
+#ifndef NO_CACHING
+      DEBUG_R("auth_dce.authenticate: acquiring context pag");
       
-      /* Assign the new login context to the current process */
+      if (server_pag)
+	krb5_env[0] = 'X';
+
       sec_login_set_context(login_context, &dce_st);
       if (dce_st)
 	{
-	  /* The context set failed. Abort and return authorization still required. */
 	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-	  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, r, "authenticate_dce_user: set_context failed for %s - %s", r->connection->user, dce_error);
+	  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
+			"auth_dce.authenticate: sec_login_set_context failed for %s - %s (%d)", r->connection->user, dce_error, dce_st);
 	  
 	  sec_login_purge_context(&login_context, &dce_st);
+	  
+	  if (server_pag)
+	    {
+	      krb5_env[0] = 'K';
+	      installpag(server_pag);
+	    }
+	  
+	  ap_note_basic_auth_failure(r);
+	  DEBUG_R("auth_dce.authenticate: returning AUTH_REQUIRED");
+	  
+	  return AUTH_REQUIRED;
+	}
+
+      request_config->pag = sec_login_inq_pag(login_context, &dce_st);
+      if (dce_st)
+	{
+	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+	  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
+			"auth_dce.authenticate: sec_login_inq_pag failed for %s - %s (%d)", r->connection->user, dce_error, dce_st);
+	  
+	  sec_login_purge_context(&login_context, &dce_st);
+	  
+	  if (server_pag)
+	    {
+	      krb5_env[0] = 'K';
+	      installpag(server_pag);
+	    }
+	  
+	  ap_note_basic_auth_failure(r);
+	  DEBUG_R("auth_dce.authenticate: returning AUTH_REQUIRED");
+	  
+	  return AUTH_REQUIRED;
+	}
+
+      sec_login_release_context(&login_context, &dce_st);
+      if (server_pag)
+	{
+	  krb5_env[0] = 'K';
+	  installpag(server_pag);
+	}
+      
+      auth_dce_add_cached_context(r, request_config);
+    }
+#else
+  request_config->login_context = login_context;
+#endif
+
+  if (dir_config->impersonate_browser)
+    {
+
+      DEBUG_R("auth_dce.authenticate: impersonating browser");
+      
+#ifndef NO_CACHING
+      krb5_env[0] = 'K';
+      sprintf(krb5_env_pag, "%08x", request_config->pag);
+      installpag(request_config->pag);
+#else
+
+      if (server_context)
+	unlink(getenv("KRB5CCNAME")+5);
+      
+      DEBUG_R("auth_dce.authenticate: calling sec_login_set_context");
+      sec_login_set_context(request_config->login_context, &dce_st);
+      if (dce_st)
+	{
+	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+	  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
+			"auth_dce.authenticate: sec_login_set_context failed for %s - %s (%d)", r->connection->user, dce_error, dce_st);
+	  
+	  sec_login_purge_context(&request_config->login_context, &dce_st);
 	  
 	  if (server_context)
 	    sec_login_set_context(server_context, &dce_st);
 	  
 	  ap_note_basic_auth_failure(r);
+	  DEBUG_R("auth_dce.authenticate: returning AUTH_REQUIRED");
+	  
 	  return AUTH_REQUIRED;
 	}
+#endif
     }
-      
-          
-  /* Save the address of the login context so dce_log_transaction
-   * can purge/release it later.
-   */
-  ap_set_module_config(r->request_config, &auth_dce_module, login_context);
                     
 
   /* The server might have failed to fill in the request_rec
@@ -473,201 +569,140 @@ int authenticate_dce_user (request_rec *r)
   if (r->finfo.st_mode == 0)
     get_path_info(r);
           
-          
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: setting CGI environment variables");
+  DEBUG_R("auth_dce.authenticate: setting CGI environment variables");
 
-          
-  /* Set two environment variables for running CGIs. The first is
-   * so the CGI can find its credentials, the second is for DCE
-   * operations that require the user's password. We could check
-   * and only set these if the request involves a CGI, but that would
-   * be at least as much overhead as just setting them.
-   */
   ap_table_set(r->subprocess_env, "KRB5CCNAME", getenv("KRB5CCNAME"));
 
-  /* Only set the password environment variable if explicitly configured
-   * to do so.
-   */
-  if (a->do_include_pw)
+  if (dir_config->include_pw)
     ap_table_set(r->subprocess_env, "DCEPW", sent_pw);  
   
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "authenticate_dce_user: returning OK");
+  DEBUG_R("auth_dce.authenticate: returning OK");
 
-  /* Whee! */
   return OK;
 }
 
 
-/* Function to check the web server configuration to determine whether
- * the user is authorized for this request.
- */
-int dce_check_authorization (request_rec *r)
+static int authorize(request_rec *r)
 {
-  /* Obtain the per-directory configuration for this request */  
-  auth_dce_config_rec *a = (auth_dce_config_rec *)
-    ap_get_module_config (r->per_dir_config, &auth_dce_module);
+  dir_config_rec *dir_config = (dir_config_rec *)ap_get_module_config(r->per_dir_config, &auth_dce_module);
 
-  /* DCE functions return status in this variable */
   error_status_t dce_st;
-  
-  /* String to store text for a given error code */
   dce_error_string_t dce_error;
-
-  /* Variable to check the status of the error-code-to-text call */
   int dce_error_st;
 
-  /* Variables to parse require directives */
   const char *require_list;
   char *require_type, *entity;
   const array_header *requires_array = ap_requires(r);
   require_line *require_lines;
 
-  /* Variables to control loops */
   int index;
-  int done = 0;
 
-  /* Store the value to be returned from this function */
-  int retval = OK;
-
+  DEBUG_R("auth_dce.authorize: called for URI %s", r->uri);
+  DEBUG_R("auth_dce.authorize: called for filename %s", r->filename);
   
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "dce_check_authorization: called for URI %s", r->uri);
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "dce_check_authorization: called for filename %s", r->filename);
-
-
-  /* Is DCE authentication turned on for this request? If not, decline it */
-  if (!a->do_auth_dce)
+  if (!dir_config->active)
     {
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "dce_check_authorization: do_auth_dce not set, returning DECLINED");
+      DEBUG_R("auth_dce.authorize: active not set, returning DECLINED");
+      
       return DECLINED;
     }
 
-
-  /* Retrieve the relevant require information for this request */
-  if (!requires_array)
+  if (!ap_get_module_config(r->request_config, &auth_dce_module))
     {
-      /* Assume no require information is the same as "require valid-user",
-       * and return OK. */
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "dce_check_authorization: no requires line, returning OK");
-      return (OK);
+      DEBUG_R("auth_dce.authorize: request_config not set, returning OK");
+
+      return OK;
     }
 
-
-  /* Loop through each require entry */
-  require_lines = (require_line *)requires_array->elts;
-  for(index = 0; (index < requires_array->nelts) && (!done); index++)
+  DEBUG_R("auth_dce.authorize: called for user %s", r->connection->user);
+  
+  if (!requires_array)
     {
-      /* If the require entry doesn't apply to this request, skip the loop */
+      /* Assume no require information is the same as "require valid-user" and return OK. */
+      DEBUG_R("auth_dce.authorize: no requires line, returning OK");
+      
+      return OK;
+    }
+
+  require_lines = (require_line *)requires_array->elts;
+  for(index = 0; index < requires_array->nelts; index++)
+    {
       if (!(require_lines[index].method_mask & (1 << r->method_number)))
 	continue;
 
-      /* We've found a require entry that limits access for this request. Assume
-       * request is forbidden or declined unless we determine otherwise.
-       */
-      retval = (a->do_auth_authoritative) ? (FORBIDDEN) : (DECLINED);
-
-      /* Get require type */
       require_list = require_lines[index].requirement;
       require_type = ap_getword_white(r->pool, &require_list);
 
       if(!strcmp(require_type, "valid-user"))
 	{
-	  /* If the type is valid-user, anybody is fine, so return OK. */
-	  retval = OK; done = 1;
-	  break;
+	  DEBUG_R("auth_dce.authorize: matched valid-user, returning OK");
+	  
+	  return OK;
 	}
-      else if(!strcmp(require_type, "user"))
-	{
-	  /* If the type is user, check all users listed on the require entry to
-	   * see if the requesting user is one of them.
-	   */
-	  while(*require_list)
-	    {
-	      entity = ap_getword_conf(r->pool, &require_list);
-	      if(!strcmp(entity, r->connection->user))
-		{
-		  /* Yep, he's there. Return OK. */
-		  retval = OK; done = 1;
-		  break;
-		}
-	    }
-	}
-        else if(!strcmp(require_type, "group"))
-	  {
-	    /* If the type is group, check each group listed on the require entry to
-	     * see if the requesting user is a member.
-	     */
 
-            while(*require_list)
+      if(!strcmp(require_type, "user"))
+	while(*require_list)
+	  {
+	    entity = ap_getword_conf(r->pool, &require_list);
+	    if(!strcmp(entity, r->connection->user))
 	      {
-		entity = ap_getword_conf(r->pool, &require_list);
-		if(sec_rgy_pgo_is_member(sec_rgy_default_handle, sec_rgy_domain_group, (unsigned_char_p_t)entity,
-					 (unsigned_char_p_t)r->connection->user, &dce_st))
-		  {
-		    retval = OK; done = 1;
-		    break;
-		  }
+		DEBUG_R("auth_dce.authorize: matched listed user, returning OK");
+		
+		return OK;
+	      }
+	  }
+
+      if(!strcmp(require_type, "group"))
+	while(*require_list)
+	  {
+	    entity = ap_getword_conf(r->pool, &require_list);
+	    if(sec_rgy_pgo_is_member(sec_rgy_default_handle, sec_rgy_domain_group, (unsigned_char_p_t)entity,
+				     (unsigned_char_p_t)r->connection->user, &dce_st))
+	      {
+		DEBUG_R("auth_dce.authorize: matched listed group %s, returning OK", entity);
+		
+		return OK;
 	      }
 	  }
     }
 
-  /* Retval is either OK if none of the require entries matched this request,
-   * FORBIDDEN/DECLINED if an entry matched and didn't allow the user, or OK if an entry
-   * matched and did allow this user.
-   */
-  return retval;
+  return ((dir_config->authoritative) ? FORBIDDEN : DECLINED);
 }
 
 
-/* Function to check the DFS ACL for the request and see if the server
- * requires authentication to access it. Only relevant if AuthDFS is
- * enabled.
- */
-int check_dfs_acl (request_rec *r)
+static int check_access(request_rec *r)
 {
-  /* Unix structure for accessing file information */
   struct stat statbuf;
 
-  /* Whether the object of the request is accessible */
   int accessible = 1;
   
-  /* Obtain the per-directory configuration for this request */  
-  auth_dce_config_rec *a = (auth_dce_config_rec *)
-    ap_get_module_config (r->per_dir_config, &auth_dce_module);
+  dir_config_rec *dir_config = (dir_config_rec *)ap_get_module_config(r->per_dir_config, &auth_dce_module);
 
-  
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "check_dfs_acl: called for URI %s", r->uri);
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "check_dfs_acl: called for filename %s", r->filename);
+  DEBUG_R("auth_dce.check_access: called for URI %s", r->uri);
+  DEBUG_R("auth_dce.check_access: called for filename %s", r->filename);
 
-
-  /* Is DCE authentication turned on for this request? If not, decline it */
-  if (!a->do_auth_dce)
+  if (!dir_config->active)
     {
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "check_dfs_acl: do_auth_dce not set, returning DECLINED");
+      if (server_context)
+	ap_table_set(r->subprocess_env, "KRB5CCNAME", getenv("KRB5CCNAME"));
+      
+      DEBUG_R("auth_dce.check_access: active not set, returning DECLINED");
+      
       return DECLINED;
     }
 
 
-  /* If AuthDFS is not set for this request, then request authentication regardless
-   * of file protections.
-   */
-  if (!a->do_auth_dfs)
+  if (!dir_config->dfs_authorization)
     accessible = 0;
   else
     {
-      /* Check whether we can get to the file. First we stat() it, then we check
-       * for the correct permissions for the type of request. If anything fails
-       * due to permission errors, the file is not accessible. If we get any
-       * other type of error, just say the file is accessible and let the
-       * server handle it. We also need to check for an index file if the URL
-       * is for a directory.
-       */
       if(stat(r->filename, &statbuf))
 	accessible = (errno != EACCES);
       else if (S_ISDIR(statbuf.st_mode))
 	{
 	  if (r->uri[strlen(r->uri)-1] == '/')
 	    {
-	      const char *indexes = (a->index_names) ? (a->index_names) : (DEFAULT_INDEX);
+	      const char *indexes = (dir_config->index_names) ? (dir_config->index_names) : (DEFAULT_INDEX);
 	      char *slash = (r->filename[strlen(r->filename)-1] == '/') ? "" : "/";
 	      int access_required = R_OK | X_OK;
 	      
@@ -697,118 +732,110 @@ int check_dfs_acl (request_rec *r)
 
   if (accessible)
     {
-      /* We can read the file without credentials. Set the request_config
-       * variable so authenticate_dce_user() knows not to bother, and return
-       * OK.
-       */
-
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "check_dfs_acl: file is accessible, returning OK");
+      DEBUG_R("auth_dce.check_access: file is accessible, returning OK");
       
       ap_set_module_config(r->request_config, &auth_dce_module, NULL);
       return OK;
     }
-  else
+
+  if (ap_table_get (r->headers_in, "Authorization") || ap_table_get (r->headers_in, "Proxy-Authorization"))
     {
-      /* Permission error. Did the browser send an Authorization or Proxy-Authorization header? */
-      if (ap_table_get (r->headers_in, "Authorization") || ap_table_get (r->headers_in, "Proxy-Authorization"))
-        {
-          /* Yes, it did. Set the request_config variable so
-           * authenticate_dce_user() knows to try and get credentials,
-           * and then return OK.
-           */
-          ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "check_dfs_acl: file not accessible, Authorization given, returning OK");
-          ap_set_module_config(r->request_config, &auth_dce_module, (void *)1);
-          return OK;
-        }
-      else
-        {
-          /* No Authorization header. Tell the browser it needs to send
-           * authorization information.
-           */
-          ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "check_dfs_acl: file not accessible, returning AUTH_REQUIRED");
-          ap_note_basic_auth_failure(r);
-          return AUTH_REQUIRED;
-        }
+      DEBUG_R("auth_dce.check_access: file not accessible, authorization given, returning OK");
+      ap_set_module_config(r->request_config, &auth_dce_module, (void *)ap_pcalloc(r->pool, sizeof(request_config_rec)));
+      
+      return OK;
     }
+  
+  DEBUG_R("auth_dce.check_access: file not accessible, returning AUTH_REQUIRED");
+  ap_note_basic_auth_failure(r);
+  
+  return AUTH_REQUIRED;
 }
 
 
-/* This function checks whether credentials were obtained for this request,
- * and if so, purges them or releases them, depending on whether caching is
- * enabled.
- */
-int dce_log_transaction(request_rec *orig)
+static int request_cleanup(request_rec *orig)
 {
-  /* DCE variable to hold pointer to login context */
   sec_login_handle_t login_context;
-
-  /* DCE functions report their status in this variable */
   error_status_t dce_st;
-
-  /* Pointer to the original request structure */
+  dce_error_string_t dce_error;
+  int dce_error_st;
+    
   request_rec *r = orig;
+  dir_config_rec *dir_config;
+  request_config_rec *request_config;
 
-  /* Per-directory DCE authentication configuration variable */
-  auth_dce_config_rec *a;
-
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "dce_log_transaction: called");
-
-
-  /* A module log function is unique in that it doesn't get passed a single
-   * request_rec structure, but rather a linked list. The original request
-   * might have resulted in any number of internal redirects, so each
-   * request_rec structure must be examined.
-   */
-  while(r)
+  while (r)
     {
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "dce_log_transaction: processing URI %s", r->uri);
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "dce_log_transaction: processing filename %s", r->filename);
-
-      /* Get the per-directory configuration information for this request */
-      a = (auth_dce_config_rec *)
-        ap_get_module_config (r->per_dir_config, &auth_dce_module);
-
+      DEBUG_R("auth_dce.request_cleanup: processing URI %s", r->uri);
+      DEBUG_R("auth_dce.request_cleanup: processing filename %s", r->filename);
+  
+      dir_config = (dir_config_rec *)ap_get_module_config(r->per_dir_config, &auth_dce_module);
       
-      /* If DCE authentication is turned on for this request and browser credentials
-       * were attached, check if there is any context to purge/release. If so, do it.
-       */
-      if (a->do_auth_dce && a->do_browser_creds)
-        if ((login_context = (sec_login_handle_t)
-             ap_get_module_config(r->request_config, &auth_dce_module)))
-          {
-#ifdef CACHING
-            ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "dce_log_transaction: unsetting KRB5CCNAME");
-	    putenv("KRB5CCNAME=");
-
-            /* Explicitly reset the PAG */
-            afs_syscall(AFSCALL_RESETPAG);
+      if (dir_config->active && dir_config->impersonate_browser &&
+	  (request_config = (request_config_rec *)ap_get_module_config(r->request_config, &auth_dce_module)))
+	{
+	  
+#ifndef NO_CACHING
+	  if (memcmp(request_config->hash_key, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 16))
+	    {
+	      if (request_config->pag) 
+		{
+	          DEBUG_R("auth_dce.request_cleanup: releasing cached context");
+	          auth_dce_release_cached_context(r, request_config);
+		}
+	    }
+	  else
+	    {
+	      DEBUG_R("auth_dce.request_cleanup: no cache state in request, purging context");
+	      sec_login_context_from_pag(&login_context, &dce_st);
+	      if (dce_st)
+		{
+		  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+		  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
+				"auth_dce.request_cleanup: sec_login_context_from_pag failed - %s (%d)", dce_error, dce_st);
+		}
+	      else
+		sec_login_purge_context(&login_context, &dce_st);
+	    }
+	  
+	  if (server_pag)
+	    {
+	      sprintf(krb5_env_pag, "%08x", server_pag);
+	      installpag(server_pag);
+	    }
+	  else
+	    {
+	      krb5_env[0] = 'X';
+	      resetpag();
+	    }
 #else
-            ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "dce_log_transaction: purging a DCE login context");
-            sec_login_purge_context(&login_context, &dce_st);
-#endif
-
-	    if (server_context) {
+	  if (request_config->login_context)
+	    {
+	      DEBUG_R("auth_dce.request_cleanup: purging context");
+	      sec_login_purge_context(&request_config->login_context, &dce_st);
+	    }
+	  
+	  if (server_context)
+	    {
 	      sec_login_set_context(server_context, &dce_st);
 	      if (dce_st)
-		ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r, "dce_log_transaction: failed to restore server context %s", r->server);
+		{
+		  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+		  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
+				"auth_dce.request_cleanup: sec_login_set_context failed - %s (%d)", dce_error, dce_st);
+		}
 	    }
-	      
-          }
+#endif
+	}
       r = r->next;
     }
+  
   return OK;
 }
 
-/* Function that is run to initialize each child process. Obtain credentials via keytab
- * if Web server is to run authenticated. This function is run after the process has
- * already changed its UID, so the keytab must be readable by the Unix identity of the
- * Web server. Each child obtains and refreshes its own credentials; while it would be
- * more efficient for the parent to do so, conflicts between threads and fork() prevent
- * this. If an error condition occurs, it is logged and the child exits. This could lead
- * to a wildly spinning parent if a condition arises that causes authentication to
- * continually fail.
- */
-static void dce_process_initialize(server_rec *s, pool *p)
+extern uid_t ap_user_id;
+
+static void initialize(server_rec *s, pool *p)
 {
   error_status_t dce_st;
   dce_error_string_t dce_error;
@@ -817,277 +844,161 @@ static void dce_process_initialize(server_rec *s, pool *p)
   boolean32 reset_passwd;
   unsigned32 kvno_worked;
   pthread_t refresh_thread;
-  
-  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, s, "dce_process_initialize: called");
 
-  if (dce_user)
+  DEBUG_S("auth_dce.initialize: user = %s", (auth_dce_server_config.user ? auth_dce_server_config.user : "NULL")); 
+  DEBUG_S("auth_dce.initialize: keytab = %s", (auth_dce_server_config.keytab ? auth_dce_server_config.keytab : "NULL")); 
+  DEBUG_S("auth_dce.initialize: certify_identity = %d", auth_dce_server_config.certify_identity);
+#ifndef NO_CACHING
+  DEBUG_S("auth_dce.initialize: cache_buckets = %d", auth_dce_server_config.cache_buckets);
+  DEBUG_S("auth_dce.initialize: cache_graceperiod = %d", auth_dce_server_config.cache_graceperiod);
+  DEBUG_S("auth_dce.initialize: cache_lifetime = %d", auth_dce_server_config.cache_lifetime);
+  DEBUG_S("auth_dce.initialize: cache_max_idle = %d", auth_dce_server_config.cache_max_idle);
+  DEBUG_S("auth_dce.initialize: cache_sweep_interval = %d", auth_dce_server_config.cache_sweep_interval);
+#endif
+
+  if (auth_dce_server_config.user)
     {
-      ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, s, "dce_process_initialize: user = %s", dce_user);
-      ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, s, "dce_process_initialize: keytab = %s", dce_keytab);
+      DEBUG_S("auth_dce.initialize: calling sec_login_setup_identity");
+
+      /* Ensure local credential files have correct ownership */
+      DEBUG_S("auth_dce.initialize: calling seteuid(%d)", ap_user_id);
+      if (seteuid(ap_user_id) == -1)
+	ap_log_error(APLOG_MARK, APLOG_ERR, s, "auth_dce.initialize: seteuid(%d) failed, credential files may be unreadable", ap_user_id);
       
-      if (!sec_login_setup_identity ((unsigned_char_p_t)dce_user,
-				     sec_login_no_flags, &server_context, &dce_st))
-	{
-	 dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-	 ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s, "dce_process_initialize: sec_login_setup_identity failed for %s - %s", dce_user, dce_error);
-	 exit(1);
-	}
-      sec_login_valid_from_keytable (server_context, rpc_c_authn_dce_secret, dce_keytab, (unsigned32) NULL, &kvno_worked,
-				     &reset_passwd, &auth_src, &dce_st);
-      if (dce_st != error_status_ok)
+      if (!sec_login_setup_identity((unsigned_char_p_t)auth_dce_server_config.user,
+				    sec_login_no_flags, &server_context, &dce_st))
 	{
 	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s, "dce_process_initialize: sec_login_valid_from_keytable failed for %s - %s", dce_user, dce_error);
+	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s,
+		       "auth_dce.initialize: sec_login_setup_identity failed for %s - %s (%d)", auth_dce_server_config.user, dce_error, dce_st);
+	  exit(1);
+	}
+
+      if (seteuid(0) == -1)
+	ap_log_error(APLOG_MARK, APLOG_ERR, s, "auth_dce.initialize: seteuid(0) failed, things will probably be goofy now");
+
+      DEBUG_S("auth_dce.initialize: calling sec_login_valid_from_keytable");
+      
+      sec_login_valid_from_keytable(server_context, rpc_c_authn_dce_secret, auth_dce_server_config.keytab, (unsigned32) NULL, &kvno_worked,
+				    &reset_passwd, &auth_src, &dce_st);
+      if (dce_st)
+	{
+	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s,
+		       "auth_dce.initialize: sec_login_valid_from_keytable failed for %s - %s (%d)", auth_dce_server_config.user, dce_error, dce_st);
 	  sec_login_purge_context(&server_context, &dce_st);
 	  exit(1);
 	}
-      if (!sec_login_certify_identity(server_context, &dce_st))
+      
+      if (auth_dce_server_config.certify_identity)
 	{
-	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s, "dce_process_initialize: sec_login_certify_identity failed for %s - %s", dce_user, dce_error);
-	  sec_login_purge_context(&server_context, &dce_st);
-	  exit(1);
+	  DEBUG_S("auth_dce.initialize: calling sec_login_certify_identity");
+
+	  if (!sec_login_certify_identity(server_context, &dce_st))
+	    {
+	      dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+	      ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s,
+			   "auth_dce.initialize: sec_login_certify_identity failed for %s - %s (%d)", auth_dce_server_config.user, dce_error, dce_st);
+	      sec_login_purge_context(&server_context, &dce_st);
+	      exit(1);
+	    }
 	}
+	  
       if (auth_src != sec_login_auth_src_network)
 	{
-	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s, "dce_process_initialize: no network credentials for %s - %s", dce_user, dce_error);
+	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s,
+		       "auth_dce.initialize: no network credentials for %s", auth_dce_server_config.user);
 	  sec_login_purge_context(&server_context, &dce_st);
 	  exit(1);
 	}
 
-      sec_login_set_context(server_context, &dce_st);
-
-      if (dce_st != error_status_ok)
+      DEBUG_S("auth_dce.initialize: spawning server credential refresh thread");
+      
+      if (pthread_create(&refresh_thread, pthread_attr_default, refresh_context, (pthread_addr_t) s))
 	{
-	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
-	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s, "dce_process_initialize: sec_login_set_context failed for %s - %s", dce_user, dce_error);
-	  sec_login_purge_context(&server_context, &dce_st);
-	  exit(1);
-	}
-
-      /* Create a thread to refresh the obtained context. */
-      if (pthread_create(&refresh_thread, pthread_attr_default, refresh_context,
-			 (pthread_addr_t) NULL))
-	{
-	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s, "dce_process_initialize: refresh pthread create failed");
+	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s,
+		       "auth_dce.initialize: pthread_create failed");
 	  exit(1);
 	}
 	
       pthread_detach(&refresh_thread);
-
     }
+
+#ifndef NO_CACHING
+  DEBUG_S("auth_dce.initialize: calling cache initialization");
+  
+  auth_dce_initialize_cache(s, p);
+#endif
 }
 
-/* Function that is run when a child process exits. It cleans up any contexts
- * left in the cache, and also the server context if need be.
- */
-static void dce_process_cleanup(server_rec *s, pool *p)
-{
-#ifdef CACHING
-  delete_cached_contexts();
-#endif
 
+static void process_initialize(server_rec *s, pool *p)
+{
+  error_status_t dce_st;
+  dce_error_string_t dce_error;
+  int dce_error_st;
+
+#ifndef NO_CACHING
+  putenv(krb5_env);
+  krb5_env[0] = 'X';
+#endif
+  
   if (server_context)
     {
-      error_status_t dce_st;
-      
-      sec_login_purge_context(&server_context, &dce_st);
-    }	
+      DEBUG_S("auth_dce.process_initialize: calling sec_login_set_context");
+
+      sec_login_set_context(server_context, &dce_st);
+      if (dce_st)
+	{
+	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s,
+		       "auth_dce.process_initialize: sec_login_set_context failed - %s (%d)", dce_error, dce_st);
+	  
+	  exit(1);
+	}
+#ifndef NO_CACHING
+      server_pag = sec_login_inq_pag(server_context, &dce_st);
+      if (dce_st)
+	{
+	  dce_error_inq_text(dce_st, dce_error, &dce_error_st);
+	  ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_EMERG, s,
+		       "auth_dce.process_initialize: sec_login_inq_pag failed - %s (%d)", dce_error, dce_st);
+	  
+	  exit(1);
+	}
+
+      sec_login_release_context(&server_context, &dce_st);
+
+      krb5_env[0] = 'K';
+      sprintf(krb5_env_pag, "%08x", server_pag);
+      installpag(server_pag);		   
+#endif
+    }
+
+#ifdef CACHE_TEST_LEVEL
+  srand48(getpid() ^ time(NULL));
+#endif
 }
 
-/* Standard module definition. Indicates which phases of the request
- * handling phase this module implements, and also what configuration file
- * commands it handles.
- */
+
 module auth_dce_module = {
    STANDARD_MODULE_STUFF,
-   NULL,	        	/* initializer */
-   create_auth_dce_dir_config,	/* dir config creater */
-   merge_dce_dir_configs,	/* dir merger --- default is to override */
-   create_dce_server_config,	/* server config */
-   merge_dce_server_configs,	/* merge server config */
-   auth_dce_cmds,		/* command table */
+   initialize,	        	/* initializer */
+   create_dir_config,    	/* dir config creater */
+   merge_dir_configs,   	/* dir merger --- default is to override */
+   create_server_config,	/* server config */
+   merge_server_configs,	/* merge server config */
+   cmds,		        /* command table */
    NULL,			/* handlers */
    NULL,			/* filename translation */
-   authenticate_dce_user,	/* check_user_id */
-   dce_check_authorization,	/* check auth */
-   check_dfs_acl,		/* check access */
+   authenticate,	        /* check_user_id */
+   authorize,	                /* check auth */
+   check_access,		/* check access */
    NULL,			/* type_checker */
    NULL,			/* fixups */
-   dce_log_transaction,		/* logger */
+   request_cleanup,		/* logger */
    NULL,                        /* [3] header parser */
-   dce_process_initialize,      /* process initializer */
-   dce_process_cleanup,         /* process exit/cleanup */
+   process_initialize,          /* process initializer */
+   NULL,                        /* process exit/cleanup */
    NULL                         /* [1] post read_request handling */
 };
-
-/* Function that is spawned as a separate thread to handle context refreshing
- * if the Web server is running authenticated.
- */
-static pthread_addr_t refresh_context(pthread_addr_t arg)
-{
-  signed32 expiration_time;
-  struct timeval now;
-  struct timespec sleep_interval;
-  error_status_t dce_st;
-  sec_login_auth_src_t auth_src;
-  unsigned32 kvno_worked;
-  boolean32 reset_passwd;
- 
-  while (1)
-    {
-      sec_login_get_expiration(server_context, &expiration_time, &dce_st);
-      
-      gettimeofday (&now, 0);
-
-      sleep_interval.tv_sec = expiration_time - now.tv_sec - 10 * 60;
-      sleep_interval.tv_nsec = 0;
-      
-      pthread_delay_np (&sleep_interval);
-	
-      sec_login_refresh_identity (server_context, &dce_st);
-      
-      sec_login_valid_from_keytable (server_context, rpc_c_authn_dce_secret, dce_keytab, (unsigned32) NULL, &kvno_worked,
-				     &reset_passwd, &auth_src, &dce_st);
-    }				   
-}
-  
-
-#ifdef CACHING
-
-/* Structure to hold information for each cache entry */
-typedef struct
-{
-  unsigned char md5_digest[16];
-  sec_login_handle_t login_context;
-  time_t expire_time;
-} cache_entry_t;  
-
-/* Cache data structures. The cache is implemented as a circular queue
- * embedded in an array.
- */
-static cache_entry_t context_cache[CACHE_SIZE];
-static int cache_head = 0;
-static int cache_tail = 0;
-static int cache_size = 0;
-
-#ifdef CACHE_STATS
-static unsigned int cache_accesses = 0;
-static unsigned int cache_hits = 0;
-#endif
-
-
-static int find_cached_context(request_rec *r, sec_login_handle_t *login_context, char *username, char *password)
-{
-  int index;
-  AP_MD5_CTX md5_context;
-  unsigned char input_digest[16];
-  time_t now = time(NULL);
-  int count;
-  error_status_t dce_st;
-
-
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "find_cached_context: called for URI %s", r->uri);
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "find_cached_context: called for filename %s", r->filename);
-
-#ifdef CACHE_STATS
-  cache_accesses++;
-    
-  if (!(cache_accesses % (CACHE_STAT_INTERVAL+1)))
-    {
-      ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO, r,
-		    "mod_auth_dce cache stats: Accesses = %d, Hits = %d, Hit percentage = %0.2f",
-		    cache_accesses-1, cache_hits, (float)cache_hits/(float)(cache_accesses-1));
-    }
-
-#endif
-
-
-  while ((cache_size > 0) && (context_cache[cache_head].expire_time < now))
-    {
-      sec_login_purge_context(&context_cache[cache_head].login_context, &dce_st);
-      cache_head = ((cache_head + 1) % CACHE_SIZE);
-      cache_size--;
-    }
-
-  /* Is the cache queue empty? */
-  if (cache_size == 0)
-    return FALSE;
-
-      
-  ap_MD5Init(&md5_context);
-  ap_MD5Update(&md5_context, (const unsigned char *)username, strlen(username));
-  ap_MD5Update(&md5_context, (const unsigned char *)password, strlen(password));
-  ap_MD5Final(input_digest, &md5_context);
-
-  
-  index = ((cache_tail+CACHE_SIZE-1)%CACHE_SIZE);
-  count = cache_size;
-
-  while (count > 0)
-    {
-      if (!strncmp((const char *)input_digest, (const char *)context_cache[index].md5_digest, 16))
-        {
-          /* Found it! Import it and return */
-
-          *login_context = context_cache[index].login_context;
-	  
-#ifdef CACHE_STATS
-          cache_hits++;
-#endif
-          return TRUE;
-        }
-      index = (index+CACHE_SIZE-1)%CACHE_SIZE;
-      count--;
-    }
-
-  return FALSE;
-  
-}
-
-static void add_cached_context(request_rec *r, sec_login_handle_t *login_context, char *username, char *password)
-{
-  AP_MD5_CTX md5_context;
-  time_t now = time(NULL);
-  error_status_t dce_st;
-
-
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "add_cached_context: called for URI %s", r->uri);
-  ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG, r, "add_cached_context: called for filename %s", r->filename);
-
-
-  if (cache_size == CACHE_SIZE)
-    {
-      sec_login_purge_context(&context_cache[cache_head].login_context, &dce_st);
-      
-      cache_head = ((cache_head+1)%CACHE_SIZE);
-      cache_size--;
-    }
-
-  ap_MD5Init(&md5_context);
-  ap_MD5Update(&md5_context, (const unsigned char *)username, strlen(username));
-  ap_MD5Update(&md5_context, (const unsigned char *)password, strlen(password));
-  ap_MD5Final(context_cache[cache_tail].md5_digest, &md5_context);
-
-  context_cache[cache_tail].expire_time = now + CACHE_TTL;
-
-  context_cache[cache_tail].login_context = *login_context;
-
-  cache_tail = (cache_tail+1)%CACHE_SIZE;
-  cache_size++;
-
-}
-
-static void delete_cached_contexts()
-{
-  error_status_t dce_st;
-  
-  while (cache_size > 0)
-    {
-      sec_login_purge_context(&context_cache[cache_head].login_context, &dce_st);
-      cache_head = ((cache_head + 1) % CACHE_SIZE);
-      cache_size--;
-    }
-}
-  
-#endif
