@@ -1,3 +1,10 @@
+2.2 - Updated module to correctly handle proxy authentication. Thanks to
+      Thomas R. Stevenson <aa0026@wayne.edu> for pointing out the problem.
+
+    - Included the httpd.conf file used in production in the Cal Poly
+      Pomona Intranet as an example configuration file.
+
+
 2.1 - Fixed typos in Configuration file for AIX systems. Thanks to
       Mike Burns <burns@cac.psu.edu> and Bas van der Vlies <basv@sara.nl>
       for pointing out the problems.

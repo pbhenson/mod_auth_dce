@@ -15,7 +15,7 @@ To apply the patch to Apache 1.3.3, run the command:
 
 
      patch -p1 -d /path/to/apache_1.3.3 < \
-          /path/to/mod_auth_dce-2.1/patches/apache-1.3.3.diff
+          /path/to/mod_auth_dce-2.2/patches/apache-1.3.3.diff
 
 
 To apply the patch to Apache 1.3.3+ssl1.29, first be sure you have already
@@ -24,7 +24,7 @@ command:
 
 
      patch -p1 -d /path/to/apache_1.3.3+ssl1.29 < \
-          /path/to/mod_auth_dce-2.1/patches/apache-1.3.3+ssl_1.29.diff
+          /path/to/mod_auth_dce-2.2/patches/apache-1.3.3+ssl_1.29.diff
 
 
 

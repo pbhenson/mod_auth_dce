@@ -739,8 +739,8 @@ int check_dfs_acl (request_rec *r)
     }
   else
     {
-      /* Permission error. Did the browser send an Authorization header? */
-      if (ap_table_get (r->headers_in, "Authorization"))
+      /* Permission error. Did the browser send an Authorization or Proxy-Authorization header? */
+      if (ap_table_get (r->headers_in, "Authorization") || ap_table_get (r->headers_in, "Proxy-Authorization"))
         {
           /* Yes, it did. Set the request_config variable so
            * authenticate_dce_user() knows to try and get credentials,
