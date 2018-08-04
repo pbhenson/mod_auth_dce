@@ -11,10 +11,10 @@ FILENAME=/dfs/user.file
 
 
 # For Digital DCE 2.0
-LIBS=-ldce
+#LIBS=-ldce
 
 # For Transarc DCE 1.1
-#LIBS=-ldce -lsocket -lnsl -lthread -lm
+LIBS=-ldce -lsocket -lnsl -lthread -lm
 
 all: test runtest
 

@@ -73,7 +73,8 @@ static void add_cached_context(request_rec *r, sec_login_handle_t *, char *, cha
  * authentication is turned on in a given directory.
  */
 typedef struct auth_dce_config_struct {
-          int do_auth_dce;
+  int do_auth_dce;
+  char *index_names;
 } auth_dce_config_rec;
 
 
@@ -91,7 +92,8 @@ void *create_auth_dce_dir_config(pool *p, char *d)
  * It is passed a flag indicating whether DCE authentication should
  * be enabled in this directory.
  */
-char *set_auth_dce (cmd_parms *cmd, void *dv, int arg) {
+char *set_auth_dce(cmd_parms *cmd, void *dv, int arg)
+{
   auth_dce_config_rec *d = (auth_dce_config_rec *)dv;
   
   d->do_auth_dce = arg;
@@ -99,15 +101,28 @@ char *set_auth_dce (cmd_parms *cmd, void *dv, int arg) {
   return NULL;
 }
 
+void *merge_dce_dir_configs(pool *p, void *basev, void *addv)
+{
+  auth_dce_config_rec *new=(auth_dce_config_rec*)pcalloc (p, sizeof(auth_dce_config_rec));
+  auth_dce_config_rec *base = (auth_dce_config_rec *)basev;
+  auth_dce_config_rec *add = (auth_dce_config_rec *)addv;
+
+  new->do_auth_dce = add->do_auth_dce;
+  new->index_names = (add->index_names) ? (add->index_names) : (base->index_names);
+  
+  return new;
+}
+
 
 /* This structure defines the configuration commands this module
  * is willing to handle.
- * Currently, the only configuration command available is "AuthDCE",
- * which turns on/off DCE authentication in a directory.
  */
 command_rec auth_dce_cmds[] = {
 { "AuthDCE", set_auth_dce, NULL, OR_AUTHCFG, FLAG,
   "Perform DCE authentication in this directory?" },
+{ "DCEDirectoryIndex", set_string_slot,
+    (void*)XtOffsetOf(auth_dce_config_rec, index_names),
+    OR_INDEXES, RAW_ARGS, NULL },
 { NULL }
 };
 
@@ -453,19 +468,40 @@ int check_dce_access (request_rec *r)
       return DECLINED;
     }
 
-  
+    
   /* Check whether we can get to the file. First we stat() it, then we check
    * for the correct permissions for the type of request. If anything fails
    * due to permission errors, the file is not accessible. If we get any
    * other type of error, just say the file is accessible and let the
-   * server handle it.
+   * server handle it. We also need to check for an index file if the URL
+   * is for a directory.
    */
   if(stat(r->filename, &statbuf))
     accessible = (errno != EACCES);
   else if (S_ISDIR(statbuf.st_mode))
     {
-      if (access(r->filename, R_OK | X_OK))
-        accessible = (errno != EACCES);
+      if (r->uri[strlen(r->uri)-1] == '/')
+        {
+          char *indexes = (a->index_names) ? (a->index_names) : (DEFAULT_INDEX);
+          char *slash = (r->filename[strlen(r->filename)-1] == '/') ? "" : "/";
+          int access_required = R_OK | X_OK;
+          
+          while (*indexes)
+            {
+              char *index = getword_conf(r->pool, &indexes);
+              char *filename = pstrcat(r->pool, r->filename, slash, index, NULL);
+
+              if (!stat(filename, &statbuf))
+                {
+                  r->filename = filename;
+                  access_required = R_OK;
+                  break;
+                }
+            }
+
+          if (access(r->filename, access_required))
+            accessible = (errno != EACCES);
+        }
     }
   else
     {
@@ -592,7 +628,7 @@ module auth_dce_module = {
    STANDARD_MODULE_STUFF,
    NULL,			/* initializer */
    create_auth_dce_dir_config,	/* dir config creater */
-   NULL,			/* dir merger --- default is to override */
+   merge_dce_dir_configs,	/* dir merger --- default is to override */
    NULL,			/* server config */
    NULL,			/* merge server config */
    auth_dce_cmds,		/* command table */

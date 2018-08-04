@@ -4,9 +4,7 @@ Digital Unix 4.0/Digital DCE 2.0
 
 The system call afs_syscall(AFSCALL_RESETPAG) does not work correctly.
 Context caching can not work securely with this bug and should be
-disabled at compile time. I'm currently working with Digital to get this
-bug fixed, with little success.
-
+disabled at compile time.
 
 
 Digital Unix 3.2/Digital DCE 1.3

@@ -13,6 +13,7 @@ File Manifest
 -------------
 
   COPYRIGHT - Copyright details
+  CHANGES - What's new in this version
   README - Installation and configuration instructions
   README.BUGS - Information about bugs in different DCE implementations
   README.PATCHES - Information about patches
@@ -68,7 +69,13 @@ appropriate location, and you have completed the installation process.
 Configuration
 -------------
 
-The only new configuration option is "AuthDCE", which should appear in
+To correctly serve index files, you need to add a "DCEDirectoryIndex"
+command right next to your current "DirectoryIndex" command, with the
+same options. If you currently have no "DirectoryIndex" command, then
+mod_auth_dce will use the same default indexes for "DCEDirectoryIndex"
+as are used for "DirectoryIndex".
+
+The only other configuration option is "AuthDCE", which should appear in
 a Directory block and takes either "On" or "Off" as an argument.
 mod_auth_dce currently uses standard Basic authorization to get the
 username and password. With stock Apache, this means the password is
@@ -156,6 +163,9 @@ the bugs checked for by the test program. The appropriate libraries to
 link with for implementations that currently have no entries in the Apache
 Configuration file or the test program Makefile are also appreciated.
 
+I'd also be very interested to hear that you're using mod_auth_dce. I'd
+appreciate it if you could send me email even if you have no problems
+or requests, so I can see how widely used the module is.
 
 The latest version of mod_auth_dce is currently available at
 

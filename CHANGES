@@ -1,0 +1,14 @@
+1.0 - Patch for Apache 1.1.3 appeared to be for a nonexistant version 1.3.2,
+      renamed patch and updated README.PATCHES.
+
+    - Added patch for mod_userdir, which was using the r->finfo structure
+      for a local stat. Added a local stat structure so the module would
+      not contaminate the request structure, which was having side effects
+      on mod_auth_dce.
+
+    - Added new configuration command, DCEDirectoryIndex, to fix problem
+      where authentication was being requested for a world-readable index
+      file in a non-world-readable directory.
+
+
+0.9 - First publicly released version
